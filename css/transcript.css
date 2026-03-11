@@ -1,0 +1,149 @@
+/* Transcript layout */
+.transcript-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 20px;
+  align-items: start;
+}
+
+/* Audio/Video player */
+.media-player {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.media-player audio,
+.media-player video {
+  width: 100%;
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+}
+.media-player audio {
+  height: 40px;
+  filter: invert(0.8) hue-rotate(180deg);
+}
+
+/* Transcript area */
+.transcript-box {
+  width: 100%;
+  min-height: 240px;
+  resize: vertical;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-light);
+  color: var(--text-primary);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  font-size: 14px;
+  font-family: inherit;
+  line-height: 1.7;
+}
+.transcript-box:focus { border-color: var(--accent); outline: none; }
+
+/* Recording state */
+.recording-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--error-dim);
+  border: 1px solid rgba(239,68,68,0.2);
+  color: var(--error);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.recording-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--error);
+  border-radius: 50%;
+  animation: blink 1s ease-in-out infinite;
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.2; }
+}
+
+/* Controls row */
+.transcript-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+/* SRT segments */
+.srt-preview {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre;
+  line-height: 1.6;
+  margin-top: 12px;
+}
+
+/* Segment list */
+.segment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.segment-item {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+}
+.segment-time {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent-light);
+  font-family: monospace;
+  margin-bottom: 3px;
+}
+.segment-text {
+  font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+/* Export options */
+.export-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Status bar */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+}
+.status-bar.ready   { background: var(--success-dim); color: var(--success); }
+.status-bar.active  { background: var(--accent-dim);  color: var(--accent-light); }
+.status-bar.warning { background: var(--warning-dim); color: var(--warning); }
+
+/* Word count */
+.word-count {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-align: right;
+  margin-top: 6px;
+}

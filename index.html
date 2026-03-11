@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CreativeOps — Creative Management & Optimization</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/variables.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/sidebar.css" />
+  <link rel="stylesheet" href="css/dashboard.css" />
+  <link rel="stylesheet" href="css/compliance.css" />
+  <link rel="stylesheet" href="css/format.css" />
+  <link rel="stylesheet" href="css/transcript.css" />
+</head>
+<body>
+  <div class="app-shell">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <div class="logo-mark">🎨</div>
+        <div class="logo-text">
+          <strong>CreativeOps</strong>
+          <span>v1.0 · Production</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <span class="nav-section-label">Overview</span>
+        <button class="nav-item active" data-page="dashboard">
+          <span class="nav-icon">⊞</span>
+          Dashboard
+        </button>
+
+        <span class="nav-section-label">Tools</span>
+        <button class="nav-item" data-page="compliance">
+          <span class="nav-icon">✓</span>
+          Compliance Checker
+        </button>
+        <button class="nav-item" data-page="format">
+          <span class="nav-icon">⊡</span>
+          Format Adapter
+        </button>
+        <button class="nav-item" data-page="transcript">
+          <span class="nav-icon">♪</span>
+          Transcript Generator
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="sidebar-user">
+          <div class="user-avatar">CO</div>
+          <div class="user-info">
+            <strong>Creative Team</strong>
+            <span>Pro Plan</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main id="main-content">
+      <!-- Pages injected here by app.js -->
+    </main>
+
+  </div>
+
+  <script src="js/app.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script src="js/compliance.js"></script>
+  <script src="js/format.js"></script>
+  <script src="js/transcript.js"></script>
+</body>
+</html>

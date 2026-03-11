@@ -1,0 +1,179 @@
+/* Platform selector tabs */
+.platform-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.platform-tab {
+  padding: 7px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border-light);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  transition: all var(--transition);
+}
+.platform-tab:hover { color: var(--text-primary); border-color: var(--accent); }
+.platform-tab.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* Two-column layout */
+.compliance-layout {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 20px;
+  align-items: start;
+}
+
+/* Preview */
+.preview-box {
+  min-height: 240px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  margin-bottom: 16px;
+  position: relative;
+}
+.preview-box img,
+.preview-box video {
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+}
+.preview-placeholder {
+  text-align: center;
+  color: var(--text-faint);
+}
+.preview-placeholder span {
+  font-size: 40px;
+  display: block;
+  margin-bottom: 8px;
+}
+
+/* File meta */
+.file-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+.file-meta-item {
+  background: var(--bg-surface);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+}
+.file-meta-item label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-faint);
+  margin-bottom: 2px;
+}
+.file-meta-item span {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* Results panel */
+.results-panel .card-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.check-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  transition: all var(--transition);
+}
+
+.check-item.pass {
+  background: var(--success-dim);
+  border-color: rgba(34, 197, 94, 0.2);
+}
+.check-item.fail {
+  background: var(--error-dim);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+.check-item.warn {
+  background: var(--warning-dim);
+  border-color: rgba(245, 158, 11, 0.2);
+}
+.check-item.pending {
+  background: var(--bg-surface);
+  border-color: var(--border);
+}
+
+.check-status-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.check-item.pass  .check-status-icon { background: var(--success); color: #fff; }
+.check-item.fail  .check-status-icon { background: var(--error);   color: #fff; }
+.check-item.warn  .check-status-icon { background: var(--warning); color: #fff; }
+.check-item.pending .check-status-icon { background: var(--border-light); color: var(--text-faint); }
+
+.check-info { flex: 1; }
+.check-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.check-detail {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+/* Overall result banner */
+.result-banner {
+  padding: 14px 18px;
+  border-radius: var(--radius-md);
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.result-banner.pass { background: var(--success-dim); color: var(--success); border: 1px solid rgba(34,197,94,0.2); }
+.result-banner.fail { background: var(--error-dim);   color: var(--error);   border: 1px solid rgba(239,68,68,0.2); }
+.result-banner.warn { background: var(--warning-dim); color: var(--warning); border: 1px solid rgba(245,158,11,0.2); }
+
+.result-banner-icon { font-size: 20px; }
+.result-banner-text span { display: block; font-size: 11px; font-weight: 400; opacity: 0.8; margin-top: 1px; }

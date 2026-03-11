@@ -1,0 +1,42 @@
+:root {
+  /* Backgrounds */
+  --bg-deep: #060E1C;
+  --bg-card: #0D1F3C;
+  --bg-surface: #152847;
+  --bg-hover: #1A3257;
+
+  /* Accent */
+  --accent: #2D7DD2;
+  --accent-light: #4A9FEE;
+  --accent-dim: rgba(45, 125, 210, 0.15);
+
+  /* Text */
+  --text-primary: #FFFFFF;
+  --text-muted: #7A94B4;
+  --text-faint: #4A6080;
+
+  /* Status */
+  --success: #22C55E;
+  --success-dim: rgba(34, 197, 94, 0.12);
+  --warning: #F59E0B;
+  --warning-dim: rgba(245, 158, 11, 0.12);
+  --error: #EF4444;
+  --error-dim: rgba(239, 68, 68, 0.12);
+
+  /* Borders */
+  --border: #1A3052;
+  --border-light: #1E3A60;
+
+  /* Spacing */
+  --sidebar-width: 240px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  /* Shadows */
+  --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.4);
+  --shadow-elevated: 0 4px 24px rgba(0, 0, 0, 0.5);
+
+  /* Transitions */
+  --transition: 0.2s ease;
+}

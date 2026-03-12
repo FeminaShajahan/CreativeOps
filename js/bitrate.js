@@ -8,6 +8,11 @@ let selectedPlatform = 'spotify';
 let targetBitrate = 128;
 let targetLUFS = -14;
 
+let waveformData = null;
+let waveformOffscreen = null;
+let waveformAnimId = null;
+let waveformAudioEl = null;
+
 const PLATFORM_TARGETS = {
   spotify:   { label: 'Spotify',   bitrate: 160, lufs: -14 },
   youtube:   { label: 'YouTube',   bitrate: 128, lufs: -13 },
@@ -180,29 +185,105 @@ function drawWaveform(file) {
   const canvas = document.getElementById('waveform-canvas');
   if (!canvas) return;
   canvas.style.display = 'block';
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  canvas.width = canvas.offsetWidth || 600;
+
+  // Stop any previous animation
+  if (waveformAnimId) { cancelAnimationFrame(waveformAnimId); waveformAnimId = null; }
 
   const reader = new FileReader();
   reader.onload = function(e) {
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     audioCtx.decodeAudioData(e.target.result, function(buffer) {
-      const data = buffer.getChannelData(0);
-      const step = Math.ceil(data.length / canvas.width);
-      const amp  = canvas.height / 2;
-      ctx.beginPath();
-      ctx.moveTo(0, amp);
-      for (let i = 0; i < canvas.width; i++) {
-        const slice = data.slice(i * step, (i + 1) * step);
-        ctx.lineTo(i, amp + Math.min(...slice) * amp);
-        ctx.lineTo(i, amp + Math.max(...slice) * amp);
+      waveformData = buffer.getChannelData(0);
+
+      // Pre-render full waveform to an offscreen canvas (unplayed / dim color)
+      const W = canvas.width, H = canvas.height;
+      waveformOffscreen = document.createElement('canvas');
+      waveformOffscreen.width = W;
+      waveformOffscreen.height = H;
+      const offCtx = waveformOffscreen.getContext('2d');
+      const step = Math.ceil(waveformData.length / W);
+      const amp  = H / 2;
+      offCtx.beginPath();
+      offCtx.moveTo(0, amp);
+      for (let i = 0; i < W; i++) {
+        const s = i * step, end = Math.min(s + step, waveformData.length);
+        let min = Infinity, max = -Infinity;
+        for (let j = s; j < end; j++) {
+          if (waveformData[j] < min) min = waveformData[j];
+          if (waveformData[j] > max) max = waveformData[j];
+        }
+        offCtx.lineTo(i, amp + min * amp);
+        offCtx.lineTo(i, amp + max * amp);
       }
-      ctx.strokeStyle = '#2D7DD2';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+      offCtx.strokeStyle = 'rgba(45,125,210,0.35)';
+      offCtx.lineWidth = 1.5;
+      offCtx.stroke();
+
+      // Hook into the audio element for playback tracking
+      const previewBox = document.getElementById('bitrate-preview-box');
+      waveformAudioEl = previewBox ? previewBox.querySelector('audio') : null;
+
+      animateWaveform();
     });
   };
   reader.readAsArrayBuffer(file);
+}
+
+function animateWaveform() {
+  const canvas = document.getElementById('waveform-canvas');
+  if (!canvas || !waveformOffscreen || !waveformData) return;
+
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const amp = H / 2;
+  const step = Math.ceil(waveformData.length / W);
+
+  let progress = 0;
+  if (waveformAudioEl && waveformAudioEl.duration) {
+    progress = waveformAudioEl.currentTime / waveformAudioEl.duration;
+  }
+  const playX = Math.floor(progress * W);
+
+  // 1. Draw dim (unplayed) full waveform
+  ctx.clearRect(0, 0, W, H);
+  ctx.drawImage(waveformOffscreen, 0, 0);
+
+  // 2. Draw bright (played) portion clipped to left of playhead
+  if (playX > 0) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, playX, H);
+    ctx.clip();
+    ctx.beginPath();
+    ctx.moveTo(0, amp);
+    for (let i = 0; i < W; i++) {
+      const s = i * step, end = Math.min(s + step, waveformData.length);
+      let min = Infinity, max = -Infinity;
+      for (let j = s; j < end; j++) {
+        if (waveformData[j] < min) min = waveformData[j];
+        if (waveformData[j] > max) max = waveformData[j];
+      }
+      ctx.lineTo(i, amp + min * amp);
+      ctx.lineTo(i, amp + max * amp);
+    }
+    ctx.strokeStyle = '#2D7DD2';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 3. Draw playhead line
+  if (playX > 0) {
+    ctx.beginPath();
+    ctx.moveTo(playX, 0);
+    ctx.lineTo(playX, H);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  waveformAnimId = requestAnimationFrame(animateWaveform);
 }
 
 // ─── AI Analysis ──────────────────────────────────────────────────────────────
@@ -379,6 +460,10 @@ async function runBitrateOpt() {
 
 // ─── Clear ────────────────────────────────────────────────────────────────────
 function clearBitrate() {
+  if (waveformAnimId) { cancelAnimationFrame(waveformAnimId); waveformAnimId = null; }
+  waveformData = null;
+  waveformOffscreen = null;
+  waveformAudioEl = null;
   bitrateFile = null;
   bitrateMeta = {};
   document.getElementById('bitrate-preview').style.display = 'none';

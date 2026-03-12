@@ -11,10 +11,12 @@ let targetFormat     = 'mp3';
 
 // Waveform
 let waveformData       = null;
-let waveformOffscreen  = null;
+let waveformBars       = null; // pre-computed RMS per bar
 let waveformAnimId     = null;
 let waveformAudioEl    = null;
 let isDraggingWaveform = false;
+
+const WAVEFORM_BAR_COUNT = 80;
 
 // Live analyser
 let analyserCtx      = null;
@@ -264,29 +266,15 @@ function drawWaveform(file) {
     audioCtx.decodeAudioData(e.target.result, function(buffer) {
       waveformData = buffer.getChannelData(0);
 
-      // Pre-render dim waveform to offscreen canvas
-      const W = canvas.width, H = canvas.height;
-      waveformOffscreen = document.createElement('canvas');
-      waveformOffscreen.width  = W;
-      waveformOffscreen.height = H;
-      const offCtx = waveformOffscreen.getContext('2d');
-      const step   = Math.ceil(waveformData.length / W);
-      const amp    = H / 2;
-      offCtx.beginPath();
-      offCtx.moveTo(0, amp);
-      for (let i = 0; i < W; i++) {
+      // Pre-compute RMS amplitude per bar
+      const step = Math.ceil(waveformData.length / WAVEFORM_BAR_COUNT);
+      waveformBars = new Float32Array(WAVEFORM_BAR_COUNT);
+      for (let i = 0; i < WAVEFORM_BAR_COUNT; i++) {
         const s = i * step, end = Math.min(s + step, waveformData.length);
-        let min = Infinity, max = -Infinity;
-        for (let j = s; j < end; j++) {
-          if (waveformData[j] < min) min = waveformData[j];
-          if (waveformData[j] > max) max = waveformData[j];
-        }
-        offCtx.lineTo(i, amp + min * amp);
-        offCtx.lineTo(i, amp + max * amp);
+        let sum = 0;
+        for (let j = s; j < end; j++) sum += waveformData[j] * waveformData[j];
+        waveformBars[i] = Math.sqrt(sum / (end - s));
       }
-      offCtx.strokeStyle = 'rgba(45,125,210,0.30)';
-      offCtx.lineWidth = 1.5;
-      offCtx.stroke();
 
       const previewBox = document.getElementById('bitrate-preview-box');
       waveformAudioEl = previewBox ? previewBox.querySelector('audio') : null;
@@ -345,81 +333,90 @@ function setupWaveformSeek(canvas, audioEl) {
 function animateWaveform() {
   const canvas      = document.getElementById('waveform-canvas');
   const levelCanvas = document.getElementById('level-canvas');
-  if (!canvas || !waveformOffscreen || !waveformData) return;
+  if (!canvas || !waveformBars) return;
 
-  const ctx  = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
-  const amp  = H / 2;
-  const step = Math.ceil(waveformData.length / W);
+  const centerY = H / 2;
+  const n = WAVEFORM_BAR_COUNT;
 
+  // Playback progress
   let progress = 0;
   if (waveformAudioEl && waveformAudioEl.duration) {
     progress = waveformAudioEl.currentTime / waveformAudioEl.duration;
   }
-  const playX = Math.floor(progress * W);
+  const playBar = Math.floor(progress * n);
 
-  // 1. Dim full waveform (pre-rendered)
+  // Normalize bar heights
+  let maxAmp = 0;
+  for (let i = 0; i < n; i++) if (waveformBars[i] > maxAmp) maxAmp = waveformBars[i];
+  if (maxAmp === 0) maxAmp = 1;
+
+  const slotW = W / n;
+  const barW  = Math.max(slotW * 0.55, 1.5);
+
   ctx.clearRect(0, 0, W, H);
-  ctx.drawImage(waveformOffscreen, 0, 0);
+  ctx.lineCap = 'round';
 
-  // 2. Bright played portion
-  if (playX > 0) {
-    ctx.save();
+  for (let i = 0; i < n; i++) {
+    const x    = i * slotW + slotW / 2;
+    const amp  = waveformBars[i] / maxAmp;
+    const barH = Math.max(amp * (centerY - 6), 2);
+    const played = i < playBar;
+
+    // Gradient: purple (270°) → orange (30°) → purple (270°)
+    const hue        = 270 - 240 * Math.sin((i / n) * Math.PI);
+    const lightness  = played ? 65 : 35;
+    const alpha      = played ? 0.92 : 0.38;
+
+    ctx.strokeStyle = `hsla(${hue}, 78%, ${lightness}%, ${alpha})`;
+    ctx.lineWidth   = barW;
     ctx.beginPath();
-    ctx.rect(0, 0, playX, H);
-    ctx.clip();
-    ctx.beginPath();
-    ctx.moveTo(0, amp);
-    for (let i = 0; i < W; i++) {
-      const s = i * step, end = Math.min(s + step, waveformData.length);
-      let min = Infinity, max = -Infinity;
-      for (let j = s; j < end; j++) {
-        if (waveformData[j] < min) min = waveformData[j];
-        if (waveformData[j] > max) max = waveformData[j];
-      }
-      ctx.lineTo(i, amp + min * amp);
-      ctx.lineTo(i, amp + max * amp);
-    }
-    ctx.strokeStyle = '#2D7DD2';
-    ctx.lineWidth = 1.5;
+    ctx.moveTo(x, centerY - barH);
+    ctx.lineTo(x, centerY + barH);
     ctx.stroke();
-    ctx.restore();
   }
 
-  // 3. Playhead line
-  if (playX > 0) {
+  // Playhead
+  if (progress > 0) {
+    const playX = progress * W;
+    ctx.lineCap     = 'butt';
+    ctx.lineWidth   = 2;
+    ctx.strokeStyle = 'rgba(255,255,255,0.75)';
     ctx.beginPath();
     ctx.moveTo(playX, 0);
     ctx.lineTo(playX, H);
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2;
     ctx.stroke();
   }
 
-  // 4. Live frequency bars (level canvas) — only while playing
+  // Live frequency bars on level canvas while playing
   if (levelCanvas && analyserNode) {
     const lCtx = levelCanvas.getContext('2d');
     const LW = levelCanvas.width, LH = levelCanvas.height;
     const isPlaying = waveformAudioEl && !waveformAudioEl.paused;
-
     lCtx.clearRect(0, 0, LW, LH);
 
     if (isPlaying) {
-      const bufLen  = analyserNode.frequencyBinCount; // 128
+      const bufLen   = analyserNode.frequencyBinCount;
       const freqData = new Uint8Array(bufLen);
       analyserNode.getByteFrequencyData(freqData);
+      const bCount  = 80;
+      const bSlotW  = LW / bCount;
+      const bW      = Math.max(bSlotW * 0.55, 1.5);
+      const binStep = Math.floor(bufLen / bCount);
+      lCtx.lineCap = 'round';
 
-      const barCount = 80;
-      const barW     = LW / barCount;
-      const binStep  = Math.floor(bufLen / barCount);
-
-      for (let i = 0; i < barCount; i++) {
+      for (let i = 0; i < bCount; i++) {
         let sum = 0;
         for (let j = i * binStep; j < (i + 1) * binStep && j < bufLen; j++) sum += freqData[j];
-        const barH = ((sum / binStep) / 255) * LH;
-        const hue  = 200 + (i / barCount) * 50; // deep blue → cyan
-        lCtx.fillStyle = `hsla(${hue}, 80%, 58%, 0.9)`;
-        lCtx.fillRect(i * barW + 1, LH - barH, Math.max(barW - 2, 1), barH);
+        const bH  = ((sum / binStep) / 255) * (LH / 2 - 2);
+        const hue = 270 - 240 * Math.sin((i / bCount) * Math.PI);
+        lCtx.strokeStyle = `hsla(${hue}, 78%, 60%, 0.85)`;
+        lCtx.lineWidth   = bW;
+        lCtx.beginPath();
+        lCtx.moveTo(i * bSlotW + bSlotW / 2, LH / 2 - bH);
+        lCtx.lineTo(i * bSlotW + bSlotW / 2, LH / 2 + bH);
+        lCtx.stroke();
       }
     }
   }
@@ -620,7 +617,7 @@ function clearBitrate() {
   analyserNode     = null;
   analyserSourceEl = null;
   waveformData     = null;
-  waveformOffscreen = null;
+  waveformBars     = null;
   if (waveformAudioEl) { waveformAudioEl.pause(); waveformAudioEl.src = ''; }
   waveformAudioEl    = null;
   isDraggingWaveform = false;

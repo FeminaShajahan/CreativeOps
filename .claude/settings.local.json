@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(open /Users/feminashajahan/Desktop/CreativeOps/index.html)"
+      "Bash(open /Users/feminashajahan/Desktop/CreativeOps/index.html)",
+      "Bash(git add js/app.js js/dashboard.js js/format.js .env.example package.json server.js .gitignore)",
+      "Bash(git commit:*)",
+      "Bash(git push origin femina-local)",
+      "Bash(gh pr:*)"
     ]
   }
 }

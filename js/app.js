@@ -5,6 +5,7 @@ const PAGES = {
   compliance: () => renderCompliance(),
   format:     () => renderFormat(),
   transcript: () => renderTranscript(),
+  bitrate:    () => renderBitrate(),
 };
 
 function navigate(page) {

@@ -154,64 +154,127 @@ def analyze():
 
 # ─── /optimize ────────────────────────────────────────────────────────────────
 VIDEO_EXTENSIONS = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv'}
-AUDIO_EXTENSIONS = {'.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac'}
+
+AUDIO_FORMAT_MAP = {
+    'mp3':  {'codec': 'libmp3lame', 'suffix': '.mp3',  'mime': 'audio/mpeg', 'lossy': True},
+    'aac':  {'codec': 'aac',        'suffix': '.aac',  'mime': 'audio/aac',  'lossy': True},
+    'ogg':  {'codec': 'libvorbis',  'suffix': '.ogg',  'mime': 'audio/ogg',  'lossy': True},
+    'flac': {'codec': 'flac',       'suffix': '.flac', 'mime': 'audio/flac', 'lossy': False},
+}
+
+VIDEO_FORMAT_MAP = {
+    'mp4':  {'a_codec': 'aac',        'suffix': '.mp4',  'mime': 'video/mp4',           'reencode_v': False},
+    'webm': {'a_codec': 'libopus',    'suffix': '.webm', 'mime': 'video/webm',          'reencode_v': True,  'v_codec': 'libvpx-vp9', 'v_bitrate': '0', 'v_crf': '30', 'ar': '48000'},
+    'mkv':  {'a_codec': 'aac',        'suffix': '.mkv',  'mime': 'video/x-matroska',    'reencode_v': False},
+}
 
 @app.route('/optimize', methods=['POST'])
 def optimize():
     if 'audio' not in request.files:
         return jsonify({'error': 'No audio file provided'}), 400
 
-    f = request.files['audio']
+    f       = request.files['audio']
     bitrate = request.form.get('bitrate', '128')
-    lufs = request.form.get('lufs', '-14')
+    lufs    = request.form.get('lufs', '-14')
+    fmt     = request.form.get('format', 'mp3')
 
-    suffix = os.path.splitext(f.filename)[1].lower() or '.mp3'
-    mime = (f.content_type or '').lower()
-    is_video = suffix in VIDEO_EXTENSIONS or mime.startswith('video/')
-    print(f"[optimize] filename={f.filename!r}  suffix={suffix!r}  mime={mime!r}  is_video={is_video}")
+    suffix   = os.path.splitext(f.filename)[1].lower() or '.tmp'
+    mime_in  = (f.content_type or '').lower()
+    is_video = suffix in VIDEO_EXTENSIONS or mime_in.startswith('video/')
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp_in:
         tmp_in_path = tmp_in.name
         f.save(tmp_in_path)
 
     if is_video:
-        # Keep original container/extension, copy video stream, re-encode audio only
-        out_suffix = suffix
-        out_mime = 'video/mp4' if suffix in {'.mp4', '.m4v', '.mov'} else 'video/webm'
+        vfmt     = VIDEO_FORMAT_MAP.get(fmt, VIDEO_FORMAT_MAP['mp4'])
+        out_suffix = vfmt['suffix']
+        out_mime   = vfmt['mime']
     else:
-        out_suffix = '.mp3'
-        out_mime = 'audio/mpeg'
+        afmt     = AUDIO_FORMAT_MAP.get(fmt, AUDIO_FORMAT_MAP['mp3'])
+        out_suffix = afmt['suffix']
+        out_mime   = afmt['mime']
 
     tmp_out_path = tmp_in_path.replace(suffix, f'_optimized{out_suffix}')
 
     try:
         if is_video:
+            if vfmt['reencode_v']:
+                # WebM: must re-encode video too (container requires VP8/VP9)
+                # libopus requires 48000 Hz
+                ar = vfmt.get('ar', '44100')
+                cmd = [
+                    'ffmpeg', '-y', '-i', tmp_in_path,
+                    '-c:v', vfmt['v_codec'],
+                    '-b:v', vfmt['v_bitrate'], '-crf', vfmt['v_crf'],
+                    '-c:a', vfmt['a_codec'],
+                    '-b:a', f'{bitrate}k',
+                    '-af', f'loudnorm=I={lufs}:LRA=11:TP=-1.5',
+                    '-ar', ar, '-ac', '2',
+                    tmp_out_path,
+                ]
+            else:
+                # MP4 / MKV: copy video stream, only re-encode audio.
+                # loudnorm requires a two-step approach when copying video:
+                # step 1 — extract + normalize audio to a temp WAV
+                # step 2 — mux normalized audio back with original video
+                tmp_audio = tmp_in_path + '_audio.wav'
+                tmp_norm  = tmp_in_path + '_norm.wav'
+
+                # Extract audio
+                r1 = subprocess.run(
+                    ['ffmpeg', '-y', '-i', tmp_in_path, '-vn', '-ar', '44100', '-ac', '2', tmp_audio],
+                    capture_output=True, text=True, timeout=120
+                )
+                if r1.returncode != 0:
+                    print('[ffmpeg extract audio]', r1.stderr[-2000:])
+                    return jsonify({'error': 'FFmpeg audio extraction failed', 'details': r1.stderr[-2000:]}), 500
+
+                # Normalize audio
+                r2 = subprocess.run(
+                    ['ffmpeg', '-y', '-i', tmp_audio,
+                     '-af', f'loudnorm=I={lufs}:LRA=11:TP=-1.5',
+                     '-ar', '44100', '-ac', '2', tmp_norm],
+                    capture_output=True, text=True, timeout=120
+                )
+                if r2.returncode != 0:
+                    print('[ffmpeg loudnorm]', r2.stderr[-2000:])
+                    return jsonify({'error': 'FFmpeg loudnorm failed', 'details': r2.stderr[-2000:]}), 500
+
+                # Mux: copy video + normalized audio
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-i', tmp_in_path,
+                    '-i', tmp_norm,
+                    '-map', '0:v:0', '-map', '1:a:0',
+                    '-c:v', 'copy',
+                    '-c:a', vfmt['a_codec'],
+                    '-b:a', f'{bitrate}k',
+                    tmp_out_path,
+                ]
+        elif afmt['lossy']:
             cmd = [
-                'ffmpeg', '-y',
-                '-i', tmp_in_path,
-                '-c:v', 'copy',          # pass video stream through unchanged
-                '-c:a', 'aac',
+                'ffmpeg', '-y', '-i', tmp_in_path,
+                '-c:a', afmt['codec'],
                 '-b:a', f'{bitrate}k',
                 '-af', f'loudnorm=I={lufs}:LRA=11:TP=-1.5',
-                '-ar', '44100',
-                '-ac', '2',
+                '-ar', '44100', '-ac', '2',
                 tmp_out_path,
             ]
         else:
+            # FLAC — lossless, no bitrate flag
             cmd = [
-                'ffmpeg', '-y',
-                '-i', tmp_in_path,
-                '-b:a', f'{bitrate}k',
+                'ffmpeg', '-y', '-i', tmp_in_path,
+                '-c:a', 'flac',
                 '-af', f'loudnorm=I={lufs}:LRA=11:TP=-1.5',
-                '-ar', '44100',
-                '-ac', '2',
+                '-ar', '44100', '-ac', '2',
                 tmp_out_path,
             ]
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-
         if result.returncode != 0:
-            return jsonify({'error': 'FFmpeg processing failed', 'details': result.stderr}), 500
+            print('[ffmpeg]', result.stderr[-3000:])
+            return jsonify({'error': 'FFmpeg processing failed', 'details': result.stderr[-3000:]}), 500
 
         base_name = os.path.splitext(f.filename)[0]
         return send_file(
@@ -222,8 +285,11 @@ def optimize():
         )
 
     finally:
-        if os.path.exists(tmp_in_path):
-            os.unlink(tmp_in_path)
+        for p in [tmp_in_path,
+                  tmp_in_path + '_audio.wav',
+                  tmp_in_path + '_norm.wav']:
+            if os.path.exists(p):
+                os.unlink(p)
 
 
 if __name__ == '__main__':

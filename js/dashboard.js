@@ -7,7 +7,6 @@ let _dbAssetIdCounter = 0;
 function renderDashboard() {
   const main = document.getElementById('main-content');
 
-  const totalAssets    = assetLibrary.length || getStat('co_total_assets');
   const formatsGen     = getStat('co_formats_generated');
   const transcripts    = getStat('co_transcripts');
   const compliancePct  = calcComplianceRate();
@@ -168,16 +167,6 @@ function renderDashboard() {
   setupDashDrop();
   setupFilterTabs();
   loadAssetsFromDB();
-
-  // Load persisted assets from backend, then refresh grid
-  loadRemoteAssets().then(() => {
-    const grid = document.getElementById('asset-grid');
-    if (!grid) return;
-    const active = document.querySelector('.asset-filter.active');
-    grid.innerHTML = renderAssetGrid(active ? active.dataset.filter : 'all');
-    const statVal = document.querySelector('.stat-value');
-    if (statVal) statVal.textContent = assetLibrary.length;
-  });
 }
 
 // ─── Upload handler ───────────────────────────────────────────────────────────
@@ -189,10 +178,10 @@ function handleDashUpload(event) {
 
 function addAsset(file) {
   const id = Date.now() + Math.random();
-  const category = file.type.startsWith('image/') ? 'image'
-                 : file.type.startsWith('video/') ? 'video'
-                 : file.type.startsWith('audio/') ? 'audio'
-                 : 'other';
+  let category = 'other';
+  if (file.type.startsWith('image/'))      category = 'image';
+  else if (file.type.startsWith('video/')) category = 'video';
+  else if (file.type.startsWith('audio/')) category = 'audio';
 
   const entry = {
     id,
@@ -208,11 +197,6 @@ function addAsset(file) {
 
   assetLibrary.unshift(entry);
   logActivity(`Uploaded <strong>${file.name}</strong> (${entry.sizeMB} MB)`, 'accent');
-
-  // Persist to backend (fire-and-forget — app works without a server too)
-  uploadToAPI(file).then(remote => {
-    if (remote) entry.remoteId = remote.id;
-  });
 
   // Re-render just the grid
   const grid = document.getElementById('asset-grid');
@@ -248,6 +232,15 @@ function renderAssetGrid(filter) {
   return `<div class="asset-grid">${filtered.map(a => renderAssetCard(a)).join('')}</div>`;
 }
 
+function assetThumbHTML(a) {
+  let icon = '📄';
+  if (a.category === 'video')      icon = '🎬';
+  else if (a.category === 'audio') icon = '🎵';
+  return a.previewURL
+    ? `<img src="${a.previewURL}" class="asset-thumb-img" alt="${a.name}" />`
+    : `<div class="asset-thumb-icon">${icon}</div>`;
+}
+
 function renderAssetCard(a) {
   const typeLabel = a.type ? (a.type.split('/')[1]?.toUpperCase() || 'FILE') : a.category.toUpperCase();
   let typeBadgeClass = '';
@@ -255,13 +248,7 @@ function renderAssetCard(a) {
   else if (a.category === 'video') typeBadgeClass = 'badge-warning';
   else if (a.category === 'audio') typeBadgeClass = 'badge-success';
 
-  let thumbIcon = '📄';
-  if (a.category === 'video') thumbIcon = '🎬';
-  else if (a.category === 'audio') thumbIcon = '🎵';
-
-  const thumbContent = a.previewURL
-    ? `<img src="${a.previewURL}" class="asset-thumb-img" alt="${a.name}" />`
-    : `<div class="asset-thumb-icon">${thumbIcon}</div>`;
+  const thumbContent = assetThumbHTML(a);
 
   const dbBadge = a.source === 'db'
     ? `<span class="asset-db-badge">☁ DB</span>`
@@ -290,8 +277,8 @@ function renderAssetCard(a) {
         ${presetInfo}
         ${timeRow}
         <div class="asset-actions">
-          <button class="asset-action-btn" ${!a.file ? 'disabled' : `onclick="sendToCompliance('${a.id}')"`} title="Check Compliance">✓ Check</button>
-          <button class="asset-action-btn" ${(!a.file || a.category !== 'image') ? 'disabled' : `onclick="sendToFormat('${a.id}')"`} title="Adapt Format">⊡ Format</button>
+          <button class="asset-action-btn" ${a.file ? `onclick="sendToCompliance('${a.id}')"` : 'disabled'} title="Check Compliance">✓ Check</button>
+          <button class="asset-action-btn" ${(a.file && a.category === 'image') ? `onclick="sendToFormat('${a.id}')"` : 'disabled'} title="Adapt Format">⊡ Format</button>
           <button class="asset-action-btn danger" title="Remove" onclick="removeAsset('${a.id}')">✕</button>
         </div>
       </div>
@@ -484,48 +471,4 @@ async function loadAssetsFromDB() {
   // Update stat count
   const statVal = document.querySelector('.stat-card .stat-value');
   if (statVal) statVal.textContent = assetLibrary.length;
-// ─── Backend API helpers ──────────────────────────────────────────────────────
-
-async function uploadToAPI(file) {
-  try {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('name', file.name);
-    const res = await fetch(`${API_BASE}/api/upload`, { method: 'POST', body: formData });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
-}
-
-async function loadRemoteAssets() {
-  try {
-    const res = await fetch(`${API_BASE}/api/creatives`);
-    if (!res.ok) return;
-    const remotes = await res.json();
-    const localNames = new Set(assetLibrary.map(a => a.name));
-    remotes.forEach(r => {
-      if (localNames.has(r.name)) return; // already present from this session
-      const category = r.mime_type?.startsWith('image/') ? 'image'
-                     : r.mime_type?.startsWith('video/') ? 'video'
-                     : r.mime_type?.startsWith('audio/') ? 'audio'
-                     : 'other';
-      assetLibrary.push({
-        id: r.id,
-        remoteId: r.id,
-        file: null, // no local File object for persisted assets
-        name: r.name,
-        type: r.mime_type || '',
-        category,
-        sizeMB: r.file_size ? (r.file_size / 1024 / 1024).toFixed(2) : '?',
-        uploadedAt: new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        uploadedDate: new Date(r.created_at).toLocaleDateString(),
-        previewURL: category === 'image' ? r.cdn_url : null,
-        cdn_url: r.cdn_url,
-      });
-    });
-  } catch {
-    // Server unavailable — app continues with local-only mode
-  }
 }

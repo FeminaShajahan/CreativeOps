@@ -1,0 +1,8 @@
+flask
+flask-cors
+librosa
+pyloudnorm
+numpy
+soundfile
+tensorflow
+tensorflow-hub

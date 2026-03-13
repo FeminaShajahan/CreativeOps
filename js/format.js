@@ -47,9 +47,10 @@ function renderFormat() {
               </select>
             </div>
 
-            <div style="display:flex; gap:8px; margin-top:12px;">
+            <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
               <button class="btn btn-primary" onclick="addToQueue()">Add to Export Queue</button>
               <button class="btn btn-secondary" onclick="downloadCurrent()">Download Now</button>
+              <button class="btn btn-secondary" id="save-library-btn" onclick="saveCanvasToLibrary()">Save to Library</button>
               <button class="btn btn-ghost" onclick="clearFormat()">Clear</button>
             </div>
           </div>
@@ -298,4 +299,37 @@ function clearFormat() {
   fmtImage = null;
   exportQueue = [];
   renderFormat();
+}
+
+// ─── Save canvas export to backend library ────────────────────────────────────
+function saveCanvasToLibrary() {
+  if (!fmtImage) return;
+  drawCanvas();
+  const canvas = document.getElementById('output-canvas');
+  const fmt = document.getElementById('output-format').value;
+  const btn = document.getElementById('save-library-btn');
+
+  if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
+
+  canvas.toBlob(async blob => {
+    const ext = fmt.split('/')[1].replace('jpeg', 'jpg');
+    const filename = `${selectedPreset.id}_${selectedPreset.w}x${selectedPreset.h}.${ext}`;
+    const formData = new FormData();
+    formData.append('file', blob, filename);
+    formData.append('name', filename);
+    formData.append('platform', selectedPreset.platform);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/upload`, { method: 'POST', body: formData });
+      if (res.ok) {
+        if (btn) { btn.textContent = '✓ Saved'; btn.disabled = false; }
+        logActivity(`Saved <strong>${filename}</strong> to library (${selectedPreset.w}×${selectedPreset.h}px)`, 'success');
+      } else {
+        throw new Error('Upload failed');
+      }
+    } catch {
+      if (btn) { btn.textContent = 'Save to Library'; btn.disabled = false; }
+      logActivity(`Could not save to library — is the server running?`, 'warning');
+    }
+  }, fmt, 0.92);
 }

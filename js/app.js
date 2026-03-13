@@ -1,5 +1,8 @@
 // ─── CreativeOps SPA Router ───────────────────────────────────────────────────
 
+// API base — works whether served from Express (port 3000) or opened directly
+const API_BASE = window.location.origin;
+
 const PAGES = {
   dashboard:  () => renderDashboard(),
   compliance: () => renderCompliance(),
@@ -19,7 +22,14 @@ function navigate(page) {
   // Render page
   const main = document.getElementById('main-content');
   main.innerHTML = '';
-  PAGES[page]();
+  try {
+    PAGES[page]();
+  } catch (err) {
+    main.innerHTML = `<div style="color:red;padding:32px;font-family:monospace;white-space:pre-wrap;">
+      <strong>Page render error (${page}):</strong>\n${err.stack || err.message}
+    </div>`;
+    console.error('navigate error:', err);
+  }
 
   // Track in localStorage for back-compat
   localStorage.setItem('co_current_page', page);

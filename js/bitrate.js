@@ -2,58 +2,53 @@
 
 const BACKEND_URL = 'http://localhost:5000';
 
-let bitrateFile      = null;
-let bitrateMeta      = {};
+let bitrateFile = null;
+let bitrateMeta = {};
 let selectedPlatform = 'spotify';
-let targetBitrate    = 128;
-let targetLUFS       = -14;
-let targetFormat     = 'mp3';
+let targetBitrate = 128;
+let targetLUFS = -14;
+let targetFormat = 'mp3';
 
 // Waveform
-let waveformData       = null;
-let waveformBars       = null; // pre-computed RMS per bar
-let waveformAnimId     = null;
-let waveformAudioEl    = null;
+let waveformData = null;
+let waveformBars = null; // pre-computed RMS per bar
+let waveformAnimId = null;
+let waveformAudioEl = null;
 let isDraggingWaveform = false;
 
 const WAVEFORM_BAR_COUNT = 80;
 
 // Live analyser
-let analyserCtx      = null;
-let analyserNode     = null;
-let analyserSource   = null;
+let analyserCtx = null;
+let analyserNode = null;
+let analyserSource = null;
 let analyserSourceEl = null;
 
 // Before / After comparison
-let originalBlobUrl  = null;
+let originalBlobUrl = null;
 let optimizedBlobUrl = null;
-let beforeAfterMode  = 'before';
-
-let waveformData = null;
-let waveformOffscreen = null;
-let waveformAnimId = null;
-let waveformAudioEl = null;
+let beforeAfterMode = 'before';
 
 const PLATFORM_TARGETS = {
-  spotify:   { label: 'Spotify',          bitrate: 160, lufs: -14 },
-  youtube:   { label: 'YouTube',          bitrate: 128, lufs: -13 },
-  broadcast: { label: 'Broadcast',        bitrate: 192, lufs: -14 },
-  tiktok:    { label: 'TikTok',           bitrate: 128, lufs: -14 },
-  instagram: { label: 'Instagram Reels',  bitrate: 128, lufs: -14 },
-  apple_pod: { label: 'Apple Podcasts',   bitrate: 96,  lufs: -16 },
+  spotify: { label: 'Spotify', bitrate: 160, lufs: -14 },
+  youtube: { label: 'YouTube', bitrate: 128, lufs: -13 },
+  broadcast: { label: 'Broadcast', bitrate: 192, lufs: -14 },
+  tiktok: { label: 'TikTok', bitrate: 128, lufs: -14 },
+  instagram: { label: 'Instagram Reels', bitrate: 128, lufs: -14 },
+  apple_pod: { label: 'Apple Podcasts', bitrate: 96, lufs: -16 },
 };
 
 const AUDIO_FORMAT_OPTIONS = {
-  mp3:  { label: 'MP3',             ext: 'mp3'  },
-  aac:  { label: 'AAC',             ext: 'aac'  },
-  ogg:  { label: 'OGG Vorbis',      ext: 'ogg'  },
+  mp3: { label: 'MP3', ext: 'mp3' },
+  aac: { label: 'AAC', ext: 'aac' },
+  ogg: { label: 'OGG Vorbis', ext: 'ogg' },
   flac: { label: 'FLAC (lossless)', ext: 'flac' },
 };
 
 const VIDEO_FORMAT_OPTIONS = {
-  mp4:  { label: 'MP4  (H.264 + AAC)',  ext: 'mp4'  },
-  webm: { label: 'WebM (VP9 + Opus)',   ext: 'webm' },
-  mkv:  { label: 'MKV  (copy + AAC)',   ext: 'mkv'  },
+  mp4: { label: 'MP4  (H.264 + AAC)', ext: 'mp4' },
+  webm: { label: 'WebM (VP9 + Opus)', ext: 'webm' },
+  mkv: { label: 'MKV  (copy + AAC)', ext: 'mkv' },
 };
 
 // alias used throughout the rest of the file
@@ -97,7 +92,7 @@ function renderBitrate() {
               <div class="platform-select-row">
                 <label>Platform:</label>
                 <select id="platform-select" onchange="setPlatformTarget(this.value)">
-                  ${Object.entries(PLATFORM_TARGETS).map(([k,v]) => `<option value="${k}" ${selectedPlatform===k?'selected':''}>${v.label}</option>`).join('')}
+                  ${Object.entries(PLATFORM_TARGETS).map(([k, v]) => `<option value="${k}" ${selectedPlatform === k ? 'selected' : ''}>${v.label}</option>`).join('')}
                 </select>
               </div>
               <div class="slider-row">
@@ -113,7 +108,7 @@ function renderBitrate() {
               <div class="platform-select-row" style="margin-top:10px; margin-bottom:0;">
                 <label>Format:</label>
                 <select id="format-select" onchange="targetFormat=this.value">
-                  ${Object.entries(FORMAT_OPTIONS).map(([k,v]) => `<option value="${k}" ${targetFormat===k?'selected':''}>${v.label}</option>`).join('')}
+                  ${Object.entries(FORMAT_OPTIONS).map(([k, v]) => `<option value="${k}" ${targetFormat === k ? 'selected' : ''}>${v.label}</option>`).join('')}
                 </select>
               </div>
               <button class="btn btn-primary" onclick="runBitrateOpt()" id="bitrate-run-btn" style="margin-top:12px;">Optimize &amp; Download</button>
@@ -145,7 +140,7 @@ function renderBitrate() {
 function setupBitrateDrop() {
   const zone = document.getElementById('bitrate-drop');
   if (!zone) return;
-  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
   zone.addEventListener('drop', e => {
     e.preventDefault();
@@ -168,7 +163,7 @@ function updateFormatSelect(isVideo) {
 function setPlatformTarget(val) {
   selectedPlatform = val;
   targetBitrate = PLATFORM_TARGETS[val].bitrate;
-  targetLUFS    = PLATFORM_TARGETS[val].lufs;
+  targetLUFS = PLATFORM_TARGETS[val].lufs;
   document.getElementById('bitrate-slider').value = targetBitrate;
   document.getElementById('bitrate-value').textContent = `${targetBitrate} kbps`;
   document.getElementById('lufs-slider').value = targetLUFS;
@@ -224,7 +219,7 @@ function handleBitrateFile(event) {
       const dur = mediaEl.duration;
       if (dur && isFinite(dur)) {
         bitrateMeta.duration = dur.toFixed(1);
-        bitrateMeta.bitrate  = `~${Math.round((file.size * 8) / dur / 1000)} kbps`;
+        bitrateMeta.bitrate = `~${Math.round((file.size * 8) / dur / 1000)} kbps`;
       }
       updateBitrateMeta(file);
     });
@@ -260,42 +255,34 @@ function drawWaveform(file) {
   canvas.style.display = 'block';
   canvas.width = canvas.offsetWidth || 600;
 
-  // Stop any previous animation
+  const levelCanvas = document.getElementById('level-canvas');
+  if (levelCanvas) { levelCanvas.style.display = 'block'; levelCanvas.width = canvas.width; }
+
   if (waveformAnimId) { cancelAnimationFrame(waveformAnimId); waveformAnimId = null; }
 
   const reader = new FileReader();
-  reader.onload = function(e) {
+  reader.onload = function (e) {
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    audioCtx.decodeAudioData(e.target.result, function(buffer) {
+    audioCtx.decodeAudioData(e.target.result, function (buffer) {
       waveformData = buffer.getChannelData(0);
 
-      // Pre-render full waveform to an offscreen canvas (unplayed / dim color)
-      const W = canvas.width, H = canvas.height;
-      waveformOffscreen = document.createElement('canvas');
-      waveformOffscreen.width = W;
-      waveformOffscreen.height = H;
-      const offCtx = waveformOffscreen.getContext('2d');
-      const step = Math.ceil(waveformData.length / W);
-      const amp  = H / 2;
-      offCtx.beginPath();
-      offCtx.moveTo(0, amp);
-      for (let i = 0; i < W; i++) {
+      // Pre-compute RMS amplitude per bar
+      const step = Math.ceil(waveformData.length / WAVEFORM_BAR_COUNT);
+      waveformBars = new Float32Array(WAVEFORM_BAR_COUNT);
+      for (let i = 0; i < WAVEFORM_BAR_COUNT; i++) {
         const s = i * step, end = Math.min(s + step, waveformData.length);
-        let min = Infinity, max = -Infinity;
-        for (let j = s; j < end; j++) {
-          if (waveformData[j] < min) min = waveformData[j];
-          if (waveformData[j] > max) max = waveformData[j];
-        }
-        offCtx.lineTo(i, amp + min * amp);
-        offCtx.lineTo(i, amp + max * amp);
+        let sum = 0;
+        for (let j = s; j < end; j++) sum += waveformData[j] * waveformData[j];
+        waveformBars[i] = Math.sqrt(sum / (end - s));
       }
-      offCtx.strokeStyle = 'rgba(45,125,210,0.35)';
-      offCtx.lineWidth = 1.5;
-      offCtx.stroke();
 
-      // Hook into the audio element for playback tracking
       const previewBox = document.getElementById('bitrate-preview-box');
       waveformAudioEl = previewBox ? previewBox.querySelector('audio') : null;
+
+      if (waveformAudioEl) {
+        setupAnalyser(waveformAudioEl);
+        setupWaveformSeek(canvas, waveformAudioEl);
+      }
 
       animateWaveform();
     });
@@ -303,60 +290,153 @@ function drawWaveform(file) {
   reader.readAsArrayBuffer(file);
 }
 
+// ─── Live Analyser ────────────────────────────────────────────────────────────
+function setupAnalyser(audioEl) {
+  if (analyserSourceEl === audioEl) return; // already wired
+  if (analyserSource) { try { analyserSource.disconnect(); } catch (e) { } analyserSource = null; }
+  if (analyserCtx) { analyserCtx.close(); analyserCtx = null; }
+
+  analyserCtx = new (window.AudioContext || window.webkitAudioContext)();
+  analyserNode = analyserCtx.createAnalyser();
+  analyserNode.fftSize = 256;
+  analyserNode.smoothingTimeConstant = 0.78;
+  analyserSource = analyserCtx.createMediaElementSource(audioEl);
+  analyserSourceEl = audioEl;
+  analyserSource.connect(analyserNode);
+  analyserNode.connect(analyserCtx.destination);
+
+  // Resume AudioContext on first user play (browser autoplay policy)
+  audioEl.addEventListener('play', () => analyserCtx.state === 'suspended' && analyserCtx.resume());
+}
+
+// ─── Click-to-seek & drag scrubbing ──────────────────────────────────────────
+function setupWaveformSeek(canvas, audioEl) {
+  function seekTo(e) {
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    if (audioEl.duration && isFinite(audioEl.duration)) {
+      audioEl.currentTime = ratio * audioEl.duration;
+    }
+  }
+
+  canvas.addEventListener('mousedown', e => { isDraggingWaveform = true; seekTo(e); });
+  canvas.addEventListener('mousemove', e => { if (isDraggingWaveform) seekTo(e); });
+  canvas.addEventListener('mouseup', () => { isDraggingWaveform = false; });
+  canvas.addEventListener('mouseleave', () => { isDraggingWaveform = false; });
+  canvas.addEventListener('touchstart', e => { e.preventDefault(); isDraggingWaveform = true; seekTo(e); }, { passive: false });
+  canvas.addEventListener('touchmove', e => { e.preventDefault(); if (isDraggingWaveform) seekTo(e); }, { passive: false });
+  canvas.addEventListener('touchend', () => { isDraggingWaveform = false; });
+}
+
+// ─── Animation loop ───────────────────────────────────────────────────────────
 function animateWaveform() {
   const canvas = document.getElementById('waveform-canvas');
-  if (!canvas || !waveformOffscreen || !waveformData) return;
+  const levelCanvas = document.getElementById('level-canvas');
+  if (!canvas || !waveformBars) return;
 
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
-  const amp = H / 2;
-  const step = Math.ceil(waveformData.length / W);
+  const centerY = H / 2;
+  const n = WAVEFORM_BAR_COUNT;
 
+  // Playback progress
   let progress = 0;
   if (waveformAudioEl && waveformAudioEl.duration) {
     progress = waveformAudioEl.currentTime / waveformAudioEl.duration;
   }
-  const playX = Math.floor(progress * W);
+  const playBar = Math.floor(progress * n);
 
-  // 1. Draw dim (unplayed) full waveform
+  // Normalize bar heights
+  let maxAmp = 0;
+  for (let i = 0; i < n; i++) if (waveformBars[i] > maxAmp) maxAmp = waveformBars[i];
+  if (maxAmp === 0) maxAmp = 1;
+
+  const slotW = W / n;
+  const barW = Math.max(slotW * 0.55, 1.5);
+
   ctx.clearRect(0, 0, W, H);
-  ctx.drawImage(waveformOffscreen, 0, 0);
+  ctx.lineCap = 'round';
 
-  // 2. Draw bright (played) portion clipped to left of playhead
-  if (playX > 0) {
-    ctx.save();
+  for (let i = 0; i < n; i++) {
+    const x = i * slotW + slotW / 2;
+    const amp = waveformBars[i] / maxAmp;
+    const barH = Math.max(amp * (centerY - 6), 2);
+    const played = i < playBar;
+
+    // Gradient: purple (270°) → orange (30°) → purple (270°)
+    const hue = 270 - 240 * Math.sin((i / n) * Math.PI);
+    const lightness = played ? 65 : 35;
+    const alpha = played ? 0.92 : 0.38;
+
+    ctx.strokeStyle = `hsla(${hue}, 78%, ${lightness}%, ${alpha})`;
+    ctx.lineWidth = barW;
     ctx.beginPath();
-    ctx.rect(0, 0, playX, H);
-    ctx.clip();
-    ctx.beginPath();
-    ctx.moveTo(0, amp);
-    for (let i = 0; i < W; i++) {
-      const s = i * step, end = Math.min(s + step, waveformData.length);
-      let min = Infinity, max = -Infinity;
-      for (let j = s; j < end; j++) {
-        if (waveformData[j] < min) min = waveformData[j];
-        if (waveformData[j] > max) max = waveformData[j];
-      }
-      ctx.lineTo(i, amp + min * amp);
-      ctx.lineTo(i, amp + max * amp);
-    }
-    ctx.strokeStyle = '#2D7DD2';
-    ctx.lineWidth = 1.5;
+    ctx.moveTo(x, centerY - barH);
+    ctx.lineTo(x, centerY + barH);
     ctx.stroke();
-    ctx.restore();
   }
 
-  // 3. Draw playhead line
-  if (playX > 0) {
+  // Playhead
+  if (progress > 0) {
+    const playX = progress * W;
+    ctx.lineCap = 'butt';
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,255,255,0.75)';
     ctx.beginPath();
     ctx.moveTo(playX, 0);
     ctx.lineTo(playX, H);
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2;
     ctx.stroke();
   }
 
+  // Live frequency bars on level canvas while playing
+  if (levelCanvas && analyserNode) {
+    const lCtx = levelCanvas.getContext('2d');
+    const LW = levelCanvas.width, LH = levelCanvas.height;
+    const isPlaying = waveformAudioEl && !waveformAudioEl.paused;
+    lCtx.clearRect(0, 0, LW, LH);
+
+    if (isPlaying) {
+      const bufLen = analyserNode.frequencyBinCount;
+      const freqData = new Uint8Array(bufLen);
+      analyserNode.getByteFrequencyData(freqData);
+      const bCount = 80;
+      const bSlotW = LW / bCount;
+      const bW = Math.max(bSlotW * 0.55, 1.5);
+      const binStep = Math.floor(bufLen / bCount);
+      lCtx.lineCap = 'round';
+
+      for (let i = 0; i < bCount; i++) {
+        let sum = 0;
+        for (let j = i * binStep; j < (i + 1) * binStep && j < bufLen; j++) sum += freqData[j];
+        const bH = ((sum / binStep) / 255) * (LH / 2 - 2);
+        const hue = 270 - 240 * Math.sin((i / bCount) * Math.PI);
+        lCtx.strokeStyle = `hsla(${hue}, 78%, 60%, 0.85)`;
+        lCtx.lineWidth = bW;
+        lCtx.beginPath();
+        lCtx.moveTo(i * bSlotW + bSlotW / 2, LH / 2 - bH);
+        lCtx.lineTo(i * bSlotW + bSlotW / 2, LH / 2 + bH);
+        lCtx.stroke();
+      }
+    }
+  }
+
   waveformAnimId = requestAnimationFrame(animateWaveform);
+}
+
+// ─── Before / After comparison ────────────────────────────────────────────────
+function switchBeforeAfter(mode) {
+  if (!waveformAudioEl || !originalBlobUrl || !optimizedBlobUrl) return;
+  beforeAfterMode = mode;
+  document.getElementById('btn-before').classList.toggle('active', mode === 'before');
+  document.getElementById('btn-after').classList.toggle('active', mode === 'after');
+
+  const wasPlaying = !waveformAudioEl.paused;
+  const t = waveformAudioEl.currentTime;
+  waveformAudioEl.src = (mode === 'after') ? optimizedBlobUrl : originalBlobUrl;
+  waveformAudioEl.load();
+  waveformAudioEl.currentTime = t;
+  if (wasPlaying) waveformAudioEl.play();
 }
 
 // ─── AI Analysis ──────────────────────────────────────────────────────────────
@@ -382,11 +462,11 @@ async function runAIAnalysis() {
 
     const rec = data.recommendation;
     targetBitrate = rec.bitrate;
-    targetLUFS    = rec.lufs;
+    targetLUFS = rec.lufs;
     const bitrateSlider = document.getElementById('bitrate-slider');
-    const lufsSlider    = document.getElementById('lufs-slider');
+    const lufsSlider = document.getElementById('lufs-slider');
     if (bitrateSlider) { bitrateSlider.value = targetBitrate; document.getElementById('bitrate-value').textContent = `${targetBitrate} kbps`; }
-    if (lufsSlider)    { lufsSlider.value    = targetLUFS;    document.getElementById('lufs-value').textContent    = `${targetLUFS} LUFS`; }
+    if (lufsSlider) { lufsSlider.value = targetLUFS; document.getElementById('lufs-value').textContent = `${targetLUFS} LUFS`; }
 
   } catch (e) {
     resultList.innerHTML = `
@@ -442,13 +522,13 @@ async function runBitrateOpt() {
   if (!bitrateFile) { alert('Please upload a file first.'); return; }
 
   const isVideoFile = bitrateFile.type.startsWith('video/');
-  const fmtMap      = isVideoFile ? VIDEO_FORMAT_OPTIONS : AUDIO_FORMAT_OPTIONS;
-  const fmtLabel    = (fmtMap[targetFormat] || Object.values(fmtMap)[0]).label;
-  const outExt      = (fmtMap[targetFormat] || Object.values(fmtMap)[0]).ext;
+  const fmtMap = isVideoFile ? VIDEO_FORMAT_OPTIONS : AUDIO_FORMAT_OPTIONS;
+  const fmtLabel = (fmtMap[targetFormat] || Object.values(fmtMap)[0]).label;
+  const outExt = (fmtMap[targetFormat] || Object.values(fmtMap)[0]).ext;
 
-  const btn        = document.getElementById('bitrate-run-btn');
+  const btn = document.getElementById('bitrate-run-btn');
   const resultList = document.getElementById('bitrate-result-list');
-  btn.disabled     = true;
+  btn.disabled = true;
 
   const existing = resultList.innerHTML;
   resultList.innerHTML = `
@@ -458,10 +538,10 @@ async function runBitrateOpt() {
     </div>` + existing;
 
   const formData = new FormData();
-  formData.append('audio',   bitrateFile);
+  formData.append('audio', bitrateFile);
   formData.append('bitrate', targetBitrate);
-  formData.append('lufs',    targetLUFS);
-  formData.append('format',  targetFormat);
+  formData.append('lufs', targetLUFS);
+  formData.append('format', targetFormat);
 
   try {
     const res = await fetch(`${BACKEND_URL}/optimize`, { method: 'POST', body: formData });
@@ -473,11 +553,11 @@ async function runBitrateOpt() {
     }
 
     const blob = await res.blob();
-    const url  = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
 
     // Auto-download
-    const a    = document.createElement('a');
-    a.href     = url;
+    const a = document.createElement('a');
+    a.href = url;
     a.download = `optimized_${bitrateFile.name.split('.')[0]}.${outExt}`;
     a.click();
 
@@ -493,7 +573,7 @@ async function runBitrateOpt() {
     }
 
     const aiSection = resultList.querySelector('.ai-analysis');
-    const aiHTML    = aiSection ? aiSection.outerHTML : '';
+    const aiHTML = aiSection ? aiSection.outerHTML : '';
     resultList.innerHTML = `
       <div class="bitrate-result-item ai-success">
         <div class="ai-success-title">✓ Optimization complete — file downloaded</div>
@@ -532,11 +612,21 @@ async function runBitrateOpt() {
 // ─── Clear ────────────────────────────────────────────────────────────────────
 function clearBitrate() {
   if (waveformAnimId) { cancelAnimationFrame(waveformAnimId); waveformAnimId = null; }
+  if (analyserSource) { try { analyserSource.disconnect(); } catch (e) { } analyserSource = null; }
+  if (analyserCtx) { analyserCtx.close(); analyserCtx = null; }
+  analyserNode = null;
+  analyserSourceEl = null;
   waveformData = null;
-  waveformOffscreen = null;
+  waveformBars = null;
+  if (waveformAudioEl) { waveformAudioEl.pause(); waveformAudioEl.src = ''; }
   waveformAudioEl = null;
+  isDraggingWaveform = false;
+  if (optimizedBlobUrl) { URL.revokeObjectURL(optimizedBlobUrl); optimizedBlobUrl = null; }
+  originalBlobUrl = null;
+  beforeAfterMode = 'before';
   bitrateFile = null;
   bitrateMeta = {};
+
   document.getElementById('bitrate-preview').style.display = 'none';
   document.getElementById('bitrate-result-list').innerHTML = `
     <div style="text-align:center; padding:24px; color:var(--text-faint); font-size:12px;">

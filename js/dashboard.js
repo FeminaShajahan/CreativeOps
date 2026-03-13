@@ -2,6 +2,7 @@
 
 // In-memory file store (persists during session)
 const assetLibrary = [];
+let _dbAssetIdCounter = 0;
 
 function renderDashboard() {
   const main = document.getElementById('main-content');
@@ -67,6 +68,7 @@ function renderDashboard() {
             <button class="asset-filter" data-filter="image">Images</button>
             <button class="asset-filter" data-filter="video">Video</button>
             <button class="asset-filter" data-filter="audio">Audio</button>
+            <button class="asset-filter" data-filter="db">☁ From DB</button>
           </div>
           ${assetLibrary.length > 0 ? `<button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;" onclick="clearAllAssets()">Clear All</button>` : ''}
         </div>
@@ -165,6 +167,7 @@ function renderDashboard() {
 
   setupDashDrop();
   setupFilterTabs();
+  loadAssetsFromDB();
 }
 
 // ─── Upload handler ───────────────────────────────────────────────────────────
@@ -211,9 +214,14 @@ function addAsset(file) {
 
 // ─── Asset grid renderer ──────────────────────────────────────────────────────
 function renderAssetGrid(filter) {
-  const filtered = filter === 'all'
-    ? assetLibrary
-    : assetLibrary.filter(a => a.category === filter);
+  let filtered;
+  if (filter === 'all') {
+    filtered = assetLibrary;
+  } else if (filter === 'db') {
+    filtered = assetLibrary.filter(a => a.source === 'db');
+  } else {
+    filtered = assetLibrary.filter(a => a.category === filter);
+  }
 
   if (filtered.length === 0) {
     return `<div class="asset-empty">
@@ -226,15 +234,33 @@ function renderAssetGrid(filter) {
 }
 
 function renderAssetCard(a) {
-  const typeLabel = a.type.split('/')[1]?.toUpperCase() || 'FILE';
-  const typeBadgeClass = a.category === 'image' ? 'badge-accent'
-                       : a.category === 'video' ? 'badge-warning'
-                       : a.category === 'audio' ? 'badge-success'
-                       : '';
+  const typeLabel = a.type ? (a.type.split('/')[1]?.toUpperCase() || 'FILE') : a.category.toUpperCase();
+  let typeBadgeClass = '';
+  if (a.category === 'image') typeBadgeClass = 'badge-accent';
+  else if (a.category === 'video') typeBadgeClass = 'badge-warning';
+  else if (a.category === 'audio') typeBadgeClass = 'badge-success';
+
+  let thumbIcon = '📄';
+  if (a.category === 'video') thumbIcon = '🎬';
+  else if (a.category === 'audio') thumbIcon = '🎵';
 
   const thumbContent = a.previewURL
     ? `<img src="${a.previewURL}" class="asset-thumb-img" alt="${a.name}" />`
-    : `<div class="asset-thumb-icon">${a.category === 'video' ? '🎬' : a.category === 'audio' ? '🎵' : '📄'}</div>`;
+    : `<div class="asset-thumb-icon">${thumbIcon}</div>`;
+
+  const dbBadge = a.source === 'db'
+    ? `<span class="asset-db-badge">☁ DB</span>`
+    : '';
+
+  let presetInfo = '';
+  if (a.source === 'db' && a.presetLabel) {
+    const dims = a.presetWidth ? ' · ' + a.presetWidth + '\xD7' + a.presetHeight : '';
+    presetInfo = '<div class="asset-preset">' + a.presetLabel + dims + '</div>';
+  }
+
+  const timeRow = a.uploadedDate
+    ? `<div class="asset-time">${a.uploadedDate} · ${a.uploadedAt}</div>`
+    : '';
 
   return `
     <div class="asset-card" id="asset-${a.id}">
@@ -243,9 +269,11 @@ function renderAssetCard(a) {
         <div class="asset-name" title="${a.name}">${a.name}</div>
         <div class="asset-meta">
           <span class="badge ${typeBadgeClass}">${typeLabel}</span>
+          ${dbBadge}
           <span class="asset-size">${a.sizeMB} MB</span>
         </div>
-        <div class="asset-time">${a.uploadedDate} · ${a.uploadedAt}</div>
+        ${presetInfo}
+        ${timeRow}
         <div class="asset-actions">
           <button class="asset-action-btn" title="Check Compliance" onclick="sendToCompliance(${a.id})">✓ Check</button>
           <button class="asset-action-btn" title="Adapt Format" onclick="sendToFormat(${a.id})">⊡ Format</button>
@@ -258,8 +286,19 @@ function renderAssetCard(a) {
 // ─── Asset actions ────────────────────────────────────────────────────────────
 function removeAsset(id) {
   const idx = assetLibrary.findIndex(a => a.id === id);
-  if (idx !== -1) assetLibrary.splice(idx, 1);
-  const card = document.getElementById(`asset-${id}`);
+  if (idx === -1) return;
+  const asset = assetLibrary[idx];
+
+  // Delete from Supabase if it came from DB
+  if (asset.source === 'db' && asset.dbId && sbClient) {
+    sbClient.from(SUPABASE_TABLE).delete().eq('id', asset.dbId).then(() => {});
+    if (asset.storagePath) {
+      sbClient.storage.from(SUPABASE_BUCKET).remove([asset.storagePath]).then(() => {});
+    }
+  }
+
+  assetLibrary.splice(idx, 1);
+  const card = document.getElementById('asset-' + id);
   if (card) {
     card.style.opacity = '0';
     card.style.transform = 'scale(0.95)';
@@ -277,19 +316,31 @@ function clearAllAssets() {
   renderDashboard();
 }
 
+async function fetchAssetFile(asset) {
+  if (asset.file) return asset.file;
+  if (!asset.storagePath || !sbClient) return null;
+  const { data, error } = await sbClient.storage.from(SUPABASE_BUCKET).download(asset.storagePath);
+  if (error || !data) return null;
+  const file = new File([data], asset.name, { type: asset.type || ('image/' + asset.category) });
+  asset.file = file; // cache for next use
+  return file;
+}
+
 function sendToCompliance(id) {
   const asset = assetLibrary.find(a => a.id === id);
   if (!asset) return;
-  // Store file reference for compliance page to pick up
-  window._pendingFile = asset.file;
   navigate('compliance');
-  // Load the file after the compliance page renders
-  setTimeout(() => {
-    if (window._pendingFile) {
-      loadComplianceFile(window._pendingFile);
-      window._pendingFile = null;
+  fetchAssetFile(asset).then(file => {
+    if (file) {
+      globalThis._pendingFile = file;
+      setTimeout(() => {
+        if (globalThis._pendingFile) {
+          loadComplianceFile(globalThis._pendingFile);
+          globalThis._pendingFile = null;
+        }
+      }, 50);
     }
-  }, 50);
+  });
 }
 
 function sendToFormat(id) {
@@ -298,14 +349,18 @@ function sendToFormat(id) {
     alert('Format Adapter only supports image files.');
     return;
   }
-  window._pendingFile = asset.file;
   navigate('format');
-  setTimeout(() => {
-    if (window._pendingFile) {
-      loadFormatFile(window._pendingFile);
-      window._pendingFile = null;
+  fetchAssetFile(asset).then(file => {
+    if (file) {
+      globalThis._pendingFile = file;
+      setTimeout(() => {
+        if (globalThis._pendingFile) {
+          loadFormatFile(globalThis._pendingFile);
+          globalThis._pendingFile = null;
+        }
+      }, 50);
     }
-  }, 50);
+  });
 }
 
 // ─── Drag & drop ──────────────────────────────────────────────────────────────
@@ -362,4 +417,54 @@ function clearActivity() {
   localStorage.removeItem('co_activity');
   renderDashboard();
   navigate('dashboard');
+}
+
+// ─── Load assets from Supabase ────────────────────────────────────────────────
+async function loadAssetsFromDB() {
+  if (!sbClient) return;
+
+  const { data, error } = await sbClient
+    .from(SUPABASE_TABLE)
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  if (error || !data || data.length === 0) return;
+
+  // Remove any previously loaded DB assets to avoid duplicates on re-render
+  for (let i = assetLibrary.length - 1; i >= 0; i--) {
+    if (assetLibrary[i].source === 'db') assetLibrary.splice(i, 1);
+  }
+
+  data.forEach(row => {
+    const sizeMB = row.file_size ? (row.file_size / 1024 / 1024).toFixed(2) : '—';
+    const createdAt = row.created_at ? new Date(row.created_at) : null;
+    assetLibrary.push({
+      id: --_dbAssetIdCounter,        // negative to avoid clashing with local Date.now() ids
+      dbId: row.id,
+      file: null,                     // fetched on demand via fetchAssetFile()
+      name: row.original_filename || row.filename,
+      type: row.media_type === 'image' ? 'image/jpeg' : 'video/mp4',
+      category: row.media_type,
+      sizeMB,
+      previewURL: row.thumbnail || null,
+      storagePath: row.storage_path || null,
+      uploadedDate: createdAt ? createdAt.toLocaleDateString() : '',
+      uploadedAt:   createdAt ? createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+      source: 'db',
+      presetLabel:  row.preset_label  || null,
+      presetWidth:  row.preset_width  || null,
+      presetHeight: row.preset_height || null,
+    });
+  });
+
+  // Refresh the grid with the active filter
+  const active = document.querySelector('.asset-filter.active');
+  const filter = active ? active.dataset.filter : 'all';
+  const grid = document.getElementById('asset-grid');
+  if (grid) grid.innerHTML = renderAssetGrid(filter);
+
+  // Update stat count
+  const statVal = document.querySelector('.stat-card .stat-value');
+  if (statVal) statVal.textContent = assetLibrary.length;
 }

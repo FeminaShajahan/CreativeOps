@@ -9,6 +9,7 @@ const PAGES = {
   format:     () => renderFormat(),
   transcript: () => renderTranscript(),
   bitrate:    () => renderBitrate(),
+  creative:   () => renderCreative(),
 };
 
 function navigate(page) {

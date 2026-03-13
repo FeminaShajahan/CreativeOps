@@ -1,3 +1,140 @@
+/* ── Creative Library ─────────────────────────────────────────────────────── */
+
+.library-search-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.library-search-row input {
+  flex: 1;
+  padding: 7px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.library-search-row input:focus {
+  border-color: var(--accent);
+}
+
+.library-loading {
+  padding: 24px;
+  color: var(--text-muted);
+  text-align: center;
+  font-size: 13px;
+}
+
+.library-empty {
+  text-align: center;
+  padding: 40px 24px;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--border-light);
+}
+
+.library-empty span {
+  font-size: 28px;
+  display: block;
+  margin-bottom: 10px;
+}
+
+.library-empty p {
+  font-size: 13px;
+}
+
+/* Creative table */
+.creative-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.creative-table th {
+  text-align: left;
+  padding: 8px 12px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.creative-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+
+.creative-table tr:last-child td {
+  border-bottom: none;
+}
+
+.creative-table tr:hover td {
+  background: var(--bg-hover);
+}
+
+/* Thumbnail */
+.creative-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  display: block;
+  background: var(--bg-surface);
+}
+
+.creative-thumb-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-surface);
+  border-radius: var(--radius-sm);
+  font-size: 22px;
+}
+
+.creative-id {
+  font-family: monospace;
+  color: var(--accent-light);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.creative-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-delete-creative {
+  padding: 4px 10px;
+  background: var(--error-dim);
+  color: var(--error);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.btn-delete-creative:hover {
+  background: var(--error);
+  color: #fff;
+}
+
+/* ── Platform selector tabs ───────────────────────────────────────────────── */
+
 /* Platform selector tabs */
 .platform-tabs {
   display: flex;

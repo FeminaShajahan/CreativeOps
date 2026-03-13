@@ -209,6 +209,8 @@ function addAsset(file) {
   // Persist to backend (fire-and-forget — app works without a server too)
   uploadToAPI(file).then(remote => {
     if (remote) entry.remoteId = remote.id;
+    // Refresh compliance creative library if it's loaded
+    if (typeof loadCreativeLibrary === 'function') loadCreativeLibrary();
   });
 
   // Re-render just the grid
@@ -301,14 +303,12 @@ function clearAllAssets() {
 function sendToCompliance(id) {
   const asset = assetLibrary.find(a => String(a.id) === String(id));
   if (!asset) return;
-  // Store file reference for compliance page to pick up
-  window._pendingFile = asset.file;
   navigate('compliance');
-  // Load the file after the compliance page renders
   setTimeout(() => {
-    if (window._pendingFile) {
-      loadComplianceFile(window._pendingFile);
-      window._pendingFile = null;
+    if (asset.file) {
+      loadComplianceFile(asset.file);
+    } else if (asset.remoteId && typeof selectForCompliance === 'function') {
+      selectForCompliance(asset.remoteId);
     }
   }, 50);
 }

@@ -331,19 +331,22 @@ function handleFormatFile(event) {
   if (file) loadFormatFile(file);
 }
 
-function loadFormatFile(file) {
+function loadFormatFile(file, options = {}) {
+  const { savedState, keepQueue } = options;
   fmtFile      = file;
   fmtMediaType = file.type.startsWith('video/') ? 'video' : 'image';
 
-  // Reset edit state for fresh file
-  editState = {
-    brightness: 0, contrast: 0, saturation: 0,
-    rotation: 0, flipH: false, flipV: false,
-    cropOffsetX: 0, cropOffsetY: 0,
-    trimStart: 0, trimEnd: 0, muteAudio: false,
-    activeTab: 'crop',
-  };
-  exportQueue = [];
+  editState = savedState
+    ? { ...savedState, activeTab: savedState.activeTab || 'crop' }
+    : {
+        brightness: 0, contrast: 0, saturation: 0,
+        rotation: 0, flipH: false, flipV: false,
+        cropOffsetX: 0, cropOffsetY: 0,
+        trimStart: 0, trimEnd: 0, muteAudio: false,
+        activeTab: 'crop',
+      };
+
+  if (!keepQueue) exportQueue = [];
 
   if (fmtMediaType === 'image') {
     fmtImage = null;
@@ -355,6 +358,7 @@ function loadFormatFile(file) {
       drawCanvas();
       setupCropDrag();
       updateFileInfoBar();
+      if (savedState) applyEditStateToUI();
     };
     img.src = url;
   } else {
@@ -364,13 +368,38 @@ function loadFormatFile(file) {
     if (videoEl) {
       videoEl.src = URL.createObjectURL(file);
       videoEl.onloadedmetadata = () => {
-        editState.trimEnd = Math.round(videoEl.duration * 10) / 10;
+        if (!savedState) {
+          editState.trimEnd = Math.round(videoEl.duration * 10) / 10;
+        }
         const trimEndEl = document.getElementById('trim-end');
         if (trimEndEl) trimEndEl.value = editState.trimEnd;
         updateFileInfoBar();
+        if (savedState) applyEditStateToUI();
       };
     }
     updateFileInfoBar();
+  }
+}
+
+/** Syncs all UI controls (sliders, flip buttons, video fields) to the current editState. */
+function applyEditStateToUI() {
+  ['brightness', 'contrast', 'saturation'].forEach(name => {
+    const slider = document.getElementById(name + '-slider');
+    const valEl  = document.getElementById(name + '-val');
+    if (slider) slider.value = editState[name];
+    if (valEl)  valEl.textContent = (editState[name] > 0 ? '+' : '') + editState[name];
+  });
+  const hBtn = document.getElementById('flip-h-btn');
+  const vBtn = document.getElementById('flip-v-btn');
+  if (hBtn) hBtn.classList.toggle('btn-active', editState.flipH);
+  if (vBtn) vBtn.classList.toggle('btn-active', editState.flipV);
+  if (fmtMediaType === 'video') {
+    const s = document.getElementById('trim-start');
+    const e = document.getElementById('trim-end');
+    const m = document.getElementById('mute-audio');
+    if (s) s.value   = editState.trimStart;
+    if (e) e.value   = editState.trimEnd;
+    if (m) m.checked = editState.muteAudio;
   }
 }
 
@@ -796,6 +825,7 @@ function renderQueue() {
         ${statusBadge}
       </div>
       <div style="display:flex; gap:6px;">
+        <button class="export-btn export-btn-edit" onclick="editQueueItem(${item.id})">✏ Edit</button>
         <button class="export-btn" onclick="downloadQueueItem(${item.id})">↓ Download</button>
         <button class="export-btn export-btn-remove" onclick="removeQueueItem(${item.id})">✕</button>
       </div>
@@ -893,6 +923,28 @@ function downloadAll() {
   exportQueue.forEach((item, i) => {
     setTimeout(() => downloadQueueItem(item.id), i * 400);
   });
+}
+
+async function editQueueItem(id) {
+  const item = exportQueue.find(i => i.id === id);
+  if (!item) return;
+
+  const restored = await restoreFileFromStorage(item);
+  if (!restored) return;
+
+  // Switch to the saved preset (or keep current if not found)
+  const matchedPreset = FORMAT_PRESETS.find(p => p.id === item.preset.id);
+  selectedPreset = matchedPreset || item.preset;
+
+  // Reload the file with the saved edit state, keeping the queue intact
+  loadFormatFile(item.file, {
+    savedState: { ...item.editStateSnapshot },
+    keepQueue: true,
+  });
+
+  // Scroll up to the editor
+  const uploadCard = document.getElementById('upload-card');
+  if (uploadCard) uploadCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 async function clearQueue() {

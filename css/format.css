@@ -364,6 +364,13 @@
 }
 .export-btn:hover { background: var(--accent); color: #fff; }
 
+.export-btn-edit {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent-light);
+}
+.export-btn-edit:hover { background: var(--accent); color: #fff; }
+
 .export-btn-remove {
   background: var(--error-dim);
   border-color: var(--error);

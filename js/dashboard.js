@@ -2,7 +2,6 @@
 
 // In-memory file store (persists during session)
 const assetLibrary = [];
-let _dbAssetIdCounter = 0;
 
 function renderDashboard() {
   const main = document.getElementById('main-content');
@@ -67,7 +66,6 @@ function renderDashboard() {
             <button class="asset-filter" data-filter="image">Images</button>
             <button class="asset-filter" data-filter="video">Video</button>
             <button class="asset-filter" data-filter="audio">Audio</button>
-            <button class="asset-filter" data-filter="db">☁ From DB</button>
           </div>
           ${assetLibrary.length > 0 ? `<button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;" onclick="clearAllAssets()">Clear All</button>` : ''}
         </div>
@@ -167,6 +165,16 @@ function renderDashboard() {
   setupDashDrop();
   setupFilterTabs();
   loadAssetsFromDB();
+
+  // Load persisted assets from backend, then refresh grid
+  loadRemoteAssets().then(() => {
+    const grid = document.getElementById('asset-grid');
+    if (!grid) return;
+    const active = document.querySelector('.asset-filter.active');
+    grid.innerHTML = renderAssetGrid(active ? active.dataset.filter : 'all');
+    const statVal = document.querySelector('.stat-value');
+    if (statVal) statVal.textContent = assetLibrary.length;
+  });
 }
 
 // ─── Upload handler ───────────────────────────────────────────────────────────
@@ -213,14 +221,9 @@ function addAsset(file) {
 
 // ─── Asset grid renderer ──────────────────────────────────────────────────────
 function renderAssetGrid(filter) {
-  let filtered;
-  if (filter === 'all') {
-    filtered = assetLibrary;
-  } else if (filter === 'db') {
-    filtered = assetLibrary.filter(a => a.source === 'db');
-  } else {
-    filtered = assetLibrary.filter(a => a.category === filter);
-  }
+  const filtered = filter === 'all'
+    ? assetLibrary
+    : assetLibrary.filter(a => a.category === filter);
 
   if (filtered.length === 0) {
     return `<div class="asset-empty">
@@ -263,6 +266,15 @@ function renderAssetCard(a) {
   const timeRow = a.uploadedDate
     ? `<div class="asset-time">${a.uploadedDate} · ${a.uploadedAt}</div>`
     : '';
+  const typeLabel = a.type.split('/')[1]?.toUpperCase() || 'FILE';
+  const typeBadgeClass = a.category === 'image' ? 'badge-accent'
+                       : a.category === 'video' ? 'badge-warning'
+                       : a.category === 'audio' ? 'badge-success'
+                       : '';
+
+  const thumbContent = a.previewURL
+    ? `<img src="${a.previewURL}" class="asset-thumb-img" alt="${a.name}" />`
+    : `<div class="asset-thumb-icon">${a.category === 'video' ? '🎬' : a.category === 'audio' ? '🎵' : '📄'}</div>`;
 
   return `
     <div class="asset-card" id="asset-${a.id}">
@@ -271,11 +283,9 @@ function renderAssetCard(a) {
         <div class="asset-name" title="${a.name}">${a.name}</div>
         <div class="asset-meta">
           <span class="badge ${typeBadgeClass}">${typeLabel}</span>
-          ${dbBadge}
           <span class="asset-size">${a.sizeMB} MB</span>
         </div>
-        ${presetInfo}
-        ${timeRow}
+        <div class="asset-time">${a.uploadedDate} · ${a.uploadedAt}</div>
         <div class="asset-actions">
           <button class="asset-action-btn" ${a.file ? `onclick="sendToCompliance('${a.id}')"` : 'disabled'} title="Check Compliance">✓ Check</button>
           <button class="asset-action-btn" ${(a.file && a.category === 'image') ? `onclick="sendToFormat('${a.id}')"` : 'disabled'} title="Adapt Format">⊡ Format</button>
@@ -287,20 +297,15 @@ function renderAssetCard(a) {
 
 // ─── Asset actions ────────────────────────────────────────────────────────────
 function removeAsset(id) {
-  const idx = assetLibrary.findIndex(a => a.id === id);
-  if (idx === -1) return;
-  const asset = assetLibrary[idx];
-
-  // Delete from Supabase if it came from DB
-  if (asset.source === 'db' && asset.dbId && sbClient) {
-    sbClient.from(CREATIVE_DASHBOARD_TABLE).delete().eq('id', asset.dbId).then(() => {});
-    if (asset.storagePath) {
-      sbClient.storage.from(SUPABASE_BUCKET).remove([asset.storagePath]).then(() => {});
+  const idx = assetLibrary.findIndex(a => String(a.id) === String(id));
+  if (idx !== -1) {
+    const asset = assetLibrary[idx];
+    assetLibrary.splice(idx, 1);
+    if (asset.remoteId) {
+      fetch(`${API_BASE}/api/creatives/${asset.remoteId}`, { method: 'DELETE' }).catch(() => {});
     }
   }
-
-  assetLibrary.splice(idx, 1);
-  const card = document.getElementById('asset-' + id);
+  const card = document.getElementById(`asset-${id}`);
   if (card) {
     card.style.opacity = '0';
     card.style.transform = 'scale(0.95)';
@@ -318,31 +323,19 @@ function clearAllAssets() {
   renderDashboard();
 }
 
-async function fetchAssetFile(asset) {
-  if (asset.file) return asset.file;
-  if (!asset.storagePath || !sbClient) return null;
-  const { data, error } = await sbClient.storage.from(SUPABASE_BUCKET).download(asset.storagePath);
-  if (error || !data) return null;
-  const file = new File([data], asset.name, { type: asset.type || ('image/' + asset.category) });
-  asset.file = file; // cache for next use
-  return file;
-}
-
 function sendToCompliance(id) {
   const asset = assetLibrary.find(a => String(a.id) === String(id));
   if (!asset) return;
+  // Store file reference for compliance page to pick up
+  window._pendingFile = asset.file;
   navigate('compliance');
-  fetchAssetFile(asset).then(file => {
-    if (file) {
-      globalThis._pendingFile = file;
-      setTimeout(() => {
-        if (globalThis._pendingFile) {
-          loadComplianceFile(globalThis._pendingFile);
-          globalThis._pendingFile = null;
-        }
-      }, 50);
+  // Load the file after the compliance page renders
+  setTimeout(() => {
+    if (window._pendingFile) {
+      loadComplianceFile(window._pendingFile);
+      window._pendingFile = null;
     }
-  });
+  }, 50);
 }
 
 function sendToFormat(id) {
@@ -351,18 +344,14 @@ function sendToFormat(id) {
     alert('Format Adapter only supports image files.');
     return;
   }
+  window._pendingFile = asset.file;
   navigate('format');
-  fetchAssetFile(asset).then(file => {
-    if (file) {
-      globalThis._pendingFile = file;
-      setTimeout(() => {
-        if (globalThis._pendingFile) {
-          loadFormatFile(globalThis._pendingFile);
-          globalThis._pendingFile = null;
-        }
-      }, 50);
+  setTimeout(() => {
+    if (window._pendingFile) {
+      loadFormatFile(window._pendingFile);
+      window._pendingFile = null;
     }
-  });
+  }, 50);
 }
 
 // ─── Drag & drop ──────────────────────────────────────────────────────────────
@@ -471,4 +460,48 @@ async function loadAssetsFromDB() {
   // Update stat count
   const statVal = document.querySelector('.stat-card .stat-value');
   if (statVal) statVal.textContent = assetLibrary.length;
+// ─── Backend API helpers ──────────────────────────────────────────────────────
+
+async function uploadToAPI(file) {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('name', file.name);
+    const res = await fetch(`${API_BASE}/api/upload`, { method: 'POST', body: formData });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+async function loadRemoteAssets() {
+  try {
+    const res = await fetch(`${API_BASE}/api/creatives`);
+    if (!res.ok) return;
+    const remotes = await res.json();
+    const localNames = new Set(assetLibrary.map(a => a.name));
+    remotes.forEach(r => {
+      if (localNames.has(r.name)) return; // already present from this session
+      const category = r.mime_type?.startsWith('image/') ? 'image'
+                     : r.mime_type?.startsWith('video/') ? 'video'
+                     : r.mime_type?.startsWith('audio/') ? 'audio'
+                     : 'other';
+      assetLibrary.push({
+        id: r.id,
+        remoteId: r.id,
+        file: null, // no local File object for persisted assets
+        name: r.name,
+        type: r.mime_type || '',
+        category,
+        sizeMB: r.file_size ? (r.file_size / 1024 / 1024).toFixed(2) : '?',
+        uploadedAt: new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        uploadedDate: new Date(r.created_at).toLocaleDateString(),
+        previewURL: category === 'image' ? r.cdn_url : null,
+        cdn_url: r.cdn_url,
+      });
+    });
+  } catch {
+    // Server unavailable — app continues with local-only mode
+  }
 }

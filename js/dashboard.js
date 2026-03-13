@@ -168,6 +168,16 @@ function renderDashboard() {
   setupDashDrop();
   setupFilterTabs();
   loadAssetsFromDB();
+
+  // Load persisted assets from backend, then refresh grid
+  loadRemoteAssets().then(() => {
+    const grid = document.getElementById('asset-grid');
+    if (!grid) return;
+    const active = document.querySelector('.asset-filter.active');
+    grid.innerHTML = renderAssetGrid(active ? active.dataset.filter : 'all');
+    const statVal = document.querySelector('.stat-value');
+    if (statVal) statVal.textContent = assetLibrary.length;
+  });
 }
 
 // ─── Upload handler ───────────────────────────────────────────────────────────
@@ -198,6 +208,11 @@ function addAsset(file) {
 
   assetLibrary.unshift(entry);
   logActivity(`Uploaded <strong>${file.name}</strong> (${entry.sizeMB} MB)`, 'accent');
+
+  // Persist to backend (fire-and-forget — app works without a server too)
+  uploadToAPI(file).then(remote => {
+    if (remote) entry.remoteId = remote.id;
+  });
 
   // Re-render just the grid
   const grid = document.getElementById('asset-grid');
@@ -275,9 +290,9 @@ function renderAssetCard(a) {
         ${presetInfo}
         ${timeRow}
         <div class="asset-actions">
-          <button class="asset-action-btn" title="Check Compliance" onclick="sendToCompliance(${a.id})">✓ Check</button>
-          <button class="asset-action-btn" title="Adapt Format" onclick="sendToFormat(${a.id})">⊡ Format</button>
-          <button class="asset-action-btn danger" title="Remove" onclick="removeAsset(${a.id})">✕</button>
+          <button class="asset-action-btn" ${!a.file ? 'disabled' : `onclick="sendToCompliance('${a.id}')"`} title="Check Compliance">✓ Check</button>
+          <button class="asset-action-btn" ${(!a.file || a.category !== 'image') ? 'disabled' : `onclick="sendToFormat('${a.id}')"`} title="Adapt Format">⊡ Format</button>
+          <button class="asset-action-btn danger" title="Remove" onclick="removeAsset('${a.id}')">✕</button>
         </div>
       </div>
     </div>`;
@@ -327,7 +342,7 @@ async function fetchAssetFile(asset) {
 }
 
 function sendToCompliance(id) {
-  const asset = assetLibrary.find(a => a.id === id);
+  const asset = assetLibrary.find(a => String(a.id) === String(id));
   if (!asset) return;
   navigate('compliance');
   fetchAssetFile(asset).then(file => {
@@ -344,7 +359,7 @@ function sendToCompliance(id) {
 }
 
 function sendToFormat(id) {
-  const asset = assetLibrary.find(a => a.id === id);
+  const asset = assetLibrary.find(a => String(a.id) === String(id));
   if (!asset || asset.category !== 'image') {
     alert('Format Adapter only supports image files.');
     return;
@@ -469,4 +484,48 @@ async function loadAssetsFromDB() {
   // Update stat count
   const statVal = document.querySelector('.stat-card .stat-value');
   if (statVal) statVal.textContent = assetLibrary.length;
+// ─── Backend API helpers ──────────────────────────────────────────────────────
+
+async function uploadToAPI(file) {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('name', file.name);
+    const res = await fetch(`${API_BASE}/api/upload`, { method: 'POST', body: formData });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+async function loadRemoteAssets() {
+  try {
+    const res = await fetch(`${API_BASE}/api/creatives`);
+    if (!res.ok) return;
+    const remotes = await res.json();
+    const localNames = new Set(assetLibrary.map(a => a.name));
+    remotes.forEach(r => {
+      if (localNames.has(r.name)) return; // already present from this session
+      const category = r.mime_type?.startsWith('image/') ? 'image'
+                     : r.mime_type?.startsWith('video/') ? 'video'
+                     : r.mime_type?.startsWith('audio/') ? 'audio'
+                     : 'other';
+      assetLibrary.push({
+        id: r.id,
+        remoteId: r.id,
+        file: null, // no local File object for persisted assets
+        name: r.name,
+        type: r.mime_type || '',
+        category,
+        sizeMB: r.file_size ? (r.file_size / 1024 / 1024).toFixed(2) : '?',
+        uploadedAt: new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        uploadedDate: new Date(r.created_at).toLocaleDateString(),
+        previewURL: category === 'image' ? r.cdn_url : null,
+        cdn_url: r.cdn_url,
+      });
+    });
+  } catch {
+    // Server unavailable — app continues with local-only mode
+  }
 }

@@ -1,10 +1,15 @@
 // ─── CreativeOps SPA Router ───────────────────────────────────────────────────
 
+// API base — works whether served from Express (port 3000) or opened directly
+const API_BASE = window.location.origin;
+
 const PAGES = {
   dashboard:  () => renderDashboard(),
   compliance: () => renderCompliance(),
   format:     () => renderFormat(),
   transcript: () => renderTranscript(),
+  bitrate:    () => renderBitrate(),
+  creative:   () => renderCreative(),
 };
 
 function navigate(page) {

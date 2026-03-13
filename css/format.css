@@ -371,6 +371,21 @@
 }
 .export-btn-remove:hover { background: var(--error); color: #fff; }
 
+/* ── DB status badges (inside queue items) ─────────────────────────────────── */
+.db-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.db-badge-uploading { background: var(--accent-dim);   color: var(--accent-light); }
+.db-badge-saved     { background: var(--success-dim);  color: var(--success); }
+.db-badge-error     { background: var(--error-dim);    color: var(--error); cursor: help; }
+
 /* ── Responsive ────────────────────────────────────────────────────────────── */
 @media (max-width: 860px) {
   .format-layout { grid-template-columns: 1fr; }

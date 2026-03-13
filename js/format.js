@@ -64,7 +64,10 @@ function renderFormat() {
           <h1>Format Adapter</h1>
           <p>Upload an image or video and adapt it for any platform — resize, crop, rotate, adjust colors.</p>
         </div>
-        <span id="backend-status" class="backend-badge backend-checking">◌ Checking backend…</span>
+        <div style="display:flex; gap:8px; flex-shrink:0;">
+          <span id="backend-status"   class="backend-badge backend-checking">◌ Checking backend…</span>
+          <span id="supabase-status"  class="backend-badge backend-checking">◌ Connecting to DB…</span>
+        </div>
       </div>
     </div>
 
@@ -239,13 +242,20 @@ function renderFormat() {
 
   setupFormatDrop();
   checkBackend();
+
+  const sbReady = initSupabase();
+  if (sbReady) {
+    loadQueueFromSupabase();
+  } else {
+    updateSupabaseStatus('unconfigured');
+  }
 }
 
 // ── Preset helpers ────────────────────────────────────────────────────────────
 function renderPresetCard(p) {
   const ratioParts = p.ratio.split(':');
-  const rW = parseFloat(ratioParts[0]);
-  const rH = parseFloat(ratioParts[1] || 1);
+  const rW = Number.parseFloat(ratioParts[0]);
+  const rH = Number.parseFloat(ratioParts[1] || 1);
   const thumbW = Math.round(36 * Math.min(1, rW / rH));
   const thumbH = Math.round(36 * Math.min(1, rH / rW));
   return `
@@ -365,36 +375,35 @@ function loadFormatFile(file) {
 }
 
 function showPreviewSection() {
-  const drop    = document.getElementById('format-drop');
-  const section = document.getElementById('format-preview-section');
-  const cWrap   = document.getElementById('canvas-wrap');
-  const vWrap   = document.getElementById('video-wrap');
-  const vTab    = document.getElementById('tab-video');
-  const mp4opt  = document.getElementById('opt-mp4');
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.style.display = val; };
 
-  if (drop)    drop.style.display    = 'none';
-  if (section) section.style.display = 'block';
+  set('format-drop',             'none');
+  set('format-preview-section',  'block');
 
   if (fmtMediaType === 'image') {
-    if (cWrap)  cWrap.style.display  = 'flex';
-    if (vWrap)  vWrap.style.display  = 'none';
-    if (vTab)   vTab.style.display   = 'none';
-    if (mp4opt) mp4opt.style.display = 'none';
-    const hintRow = document.getElementById('crop-hint-row');
-    if (hintRow) hintRow.style.display = 'flex';
+    applyImagePreviewLayout(set);
   } else {
-    if (cWrap)  cWrap.style.display  = 'none';
-    if (vWrap)  vWrap.style.display  = 'block';
-    if (vTab)   vTab.style.display   = '';
-    if (mp4opt) mp4opt.style.display = '';
-    // Auto-select MP4 for video
-    const fmtSel = document.getElementById('output-format');
-    if (fmtSel) fmtSel.value = 'video/mp4';
-    // Switch to video tab
-    switchEditTab('video');
+    applyVideoPreviewLayout(set);
   }
-
   updateExportButton();
+}
+
+function applyImagePreviewLayout(set) {
+  set('canvas-wrap',   'flex');
+  set('video-wrap',    'none');
+  set('tab-video',     'none');
+  set('opt-mp4',       'none');
+  set('crop-hint-row', 'flex');
+}
+
+function applyVideoPreviewLayout(set) {
+  set('canvas-wrap', 'none');
+  set('video-wrap',  'block');
+  set('tab-video',   '');
+  set('opt-mp4',     '');
+  const fmtSel = document.getElementById('output-format');
+  if (fmtSel) fmtSel.value = 'video/mp4';
+  switchEditTab('video');
 }
 
 function updateFileInfoBar() {
@@ -719,23 +728,38 @@ function addToQueue() {
   const ext = fmt.split('/')[1].replace('jpeg', 'jpg');
 
   let previewDataURL = '';
+  let thumbnail      = '';
   if (fmtMediaType === 'image' && fmtImage) {
     drawCanvas();
     previewDataURL = getFilteredDataURL(fmt);
+    thumbnail      = generateThumbnail();
+  } else if (fmtMediaType === 'video') {
+    thumbnail = generateVideoThumbnail();
   }
 
-  exportQueue.push({
-    id:                Date.now(),
-    file:              fmtFile,
-    mediaType:         fmtMediaType,
-    preset:            { ...selectedPreset },
-    editStateSnapshot: { ...editState },
-    outputFormat:      fmt,
+  const item = {
+    id:               Date.now(),   // local numeric id — used in DOM/onclick
+    dbId:             null,         // Supabase UUID — set after DB insert
+    file:             fmtFile,
+    mediaType:        fmtMediaType,
+    preset:           { ...selectedPreset },
+    editStateSnapshot:{ ...editState },
+    outputFormat:     fmt,
     previewDataURL,
-    filename: `${selectedPreset.id}_${selectedPreset.w}x${selectedPreset.h}.${ext}`,
-  });
+    thumbnail,
+    storagePath:      null,
+    originalFilename: fmtFile.name,
+    filename:         `${selectedPreset.id}_${selectedPreset.w}x${selectedPreset.h}.${ext}`,
+    uploading:        false,
+    uploadError:      null,
+  };
 
+  exportQueue.push(item);
   renderQueue();
+
+  // Upload to Supabase in the background (fire-and-forget)
+  uploadToSupabase(item);
+
   incrementStat('co_formats_generated');
   logActivity(`Added <strong>${selectedPreset.label}</strong> to export queue`, 'accent');
 }
@@ -749,22 +773,74 @@ function renderQueue() {
   if (exportQueue.length > 0) queueCard.style.display = 'block';
   if (countEl) countEl.textContent = exportQueue.length;
 
-  queueEl.innerHTML = exportQueue.map(item => `
+  queueEl.innerHTML = exportQueue.map(item => {
+    const thumbSrc = item.thumbnail || item.previewDataURL || '';
+    const isImage  = item.mediaType === 'image';
+
+    let statusBadge = '';
+    if (item.uploading)        statusBadge = `<span class="db-badge db-badge-uploading">↑ Saving…</span>`;
+    else if (item.uploadError) statusBadge = `<span class="db-badge db-badge-error" title="${item.uploadError}">⚠ DB error</span>`;
+    else if (item.dbId)        statusBadge = `<span class="db-badge db-badge-saved">✓ Saved to DB</span>`;
+
+    const thumbIcon = isImage ? '🖼' : '🎬';
+    const thumbHtml = (thumbSrc && isImage)
+      ? `<img src="${thumbSrc}" style="width:100%; height:100%; object-fit:cover;" />`
+      : `<span style="font-size:18px;">${thumbIcon}</span>`;
+
+    return `
     <div class="export-item" id="qi-${item.id}">
-      <div class="export-thumb">
-        ${item.previewDataURL
-          ? `<img src="${item.previewDataURL}" style="width:100%; height:100%; object-fit:cover;" />`
-          : `<span style="font-size:18px;">🎬</span>`}
-      </div>
+      <div class="export-thumb">${thumbHtml}</div>
       <div class="export-info">
         <div class="export-name">${item.preset.label} · ${item.preset.ratio}</div>
         <div class="export-size">${item.preset.w}×${item.preset.h}px · ${item.filename}</div>
+        ${statusBadge}
       </div>
       <div style="display:flex; gap:6px;">
         <button class="export-btn" onclick="downloadQueueItem(${item.id})">↓ Download</button>
         <button class="export-btn export-btn-remove" onclick="removeQueueItem(${item.id})">✕</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+}
+
+/** Restores item.file from Supabase Storage when it is no longer in memory. */
+async function restoreFileFromStorage(item) {
+  if (item.file || !item.storagePath || !sbClient) return true;
+  try {
+    const { data: blob, error } = await sbClient.storage
+      .from(SUPABASE_BUCKET).download(item.storagePath);
+    if (error) throw error;
+    item.file = new File([blob], item.originalFilename || item.filename, {
+      type: item.mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
+    });
+    return true;
+  } catch (err) {
+    const fallback = item.thumbnail || item.previewDataURL;
+    if (fallback) triggerDownload(fallback, item.filename);
+    else alert(`Cannot restore file: ${err.message}`);
+    return false;
+  }
+}
+
+/** Sends item to the Java backend for high-quality processing and triggers download. */
+async function downloadViaBackend(item) {
+  const snap   = item.editStateSnapshot;
+  const fmtExt = item.outputFormat.split('/')[1].replace('jpeg', 'jpg');
+  const req    = {
+    type: item.mediaType, targetWidth: item.preset.w, targetHeight: item.preset.h,
+    outputFormat: fmtExt,
+    brightness: snap.brightness, contrast: snap.contrast, saturation: snap.saturation,
+    rotation: snap.rotation, flipHorizontal: snap.flipH, flipVertical: snap.flipV,
+    cropOffsetX: snap.cropOffsetX, cropOffsetY: snap.cropOffsetY,
+    trimStart: snap.trimStart, trimEnd: snap.trimEnd, muteAudio: snap.muteAudio,
+  };
+  const fd = new FormData();
+  fd.append('file', item.file);
+  fd.append('request', new Blob([JSON.stringify(req)], { type: 'application/json' }));
+  const resp = await fetch(`${BACKEND_URL}/api/format/process`, { method: 'POST', body: fd });
+  if (!resp.ok) throw new Error(`Server ${resp.status}`);
+  const blob = await resp.blob();
+  triggerDownload(URL.createObjectURL(blob), item.filename);
 }
 
 async function downloadQueueItem(id) {
@@ -776,36 +852,35 @@ async function downloadQueueItem(id) {
     return;
   }
 
+  const restored = await restoreFileFromStorage(item);
+  if (!restored) return;
+
   if (backendAvailable && item.outputFormat !== 'image/webp') {
-    // Re-process with saved snapshot via backend
-    const snap = item.editStateSnapshot;
-    const fmtExt = item.outputFormat.split('/')[1].replace('jpeg', 'jpg');
-    const req = {
-      type: item.mediaType, targetWidth: item.preset.w, targetHeight: item.preset.h,
-      outputFormat: fmtExt,
-      brightness: snap.brightness, contrast: snap.contrast, saturation: snap.saturation,
-      rotation: snap.rotation, flipHorizontal: snap.flipH, flipVertical: snap.flipV,
-      cropOffsetX: snap.cropOffsetX, cropOffsetY: snap.cropOffsetY,
-      trimStart: snap.trimStart, trimEnd: snap.trimEnd, muteAudio: snap.muteAudio,
-    };
-    const fd = new FormData();
-    fd.append('file', item.file);
-    fd.append('request', new Blob([JSON.stringify(req)], { type: 'application/json' }));
     try {
-      const resp = await fetch(`${BACKEND_URL}/api/format/process`, { method: 'POST', body: fd });
-      if (!resp.ok) throw new Error(`Server ${resp.status}`);
-      const blob = await resp.blob();
-      triggerDownload(URL.createObjectURL(blob), item.filename);
+      await downloadViaBackend(item);
     } catch (err) {
-      if (item.previewDataURL) triggerDownload(item.previewDataURL, item.filename);
+      const fallback = item.previewDataURL || item.thumbnail;
+      if (fallback) triggerDownload(fallback, item.filename);
       else alert(`Download failed: ${err.message}`);
     }
-  } else if (item.previewDataURL) {
-    triggerDownload(item.previewDataURL, item.filename);
+  } else {
+    const src = item.previewDataURL || item.thumbnail;
+    if (src) triggerDownload(src, item.filename);
   }
 }
 
-function removeQueueItem(id) {
+async function removeQueueItem(id) {
+  const item = exportQueue.find(i => i.id === id);
+  if (item?.dbId && sbClient) {
+    try {
+      await sbClient.from(SUPABASE_TABLE).delete().eq('id', item.dbId);
+      if (item.storagePath) {
+        await sbClient.storage.from(SUPABASE_BUCKET).remove([item.storagePath]);
+      }
+    } catch (err) {
+      console.error('[CreativeOps] Failed to delete from Supabase:', err);
+    }
+  }
   exportQueue = exportQueue.filter(i => i.id !== id);
   renderQueue();
   if (exportQueue.length === 0) {
@@ -820,7 +895,21 @@ function downloadAll() {
   });
 }
 
-function clearQueue() {
+async function clearQueue() {
+  // Delete all DB records and storage files for this session
+  if (sbClient) {
+    const toDelete = exportQueue.filter(i => i.dbId);
+    for (const item of toDelete) {
+      try {
+        await sbClient.from(SUPABASE_TABLE).delete().eq('id', item.dbId);
+        if (item.storagePath) {
+          await sbClient.storage.from(SUPABASE_BUCKET).remove([item.storagePath]);
+        }
+      } catch (err) {
+        console.error('[CreativeOps] Failed to delete queue item from Supabase:', err);
+      }
+    }
+  }
   exportQueue = [];
   renderQueue();
   const queueCard = document.getElementById('queue-card');
@@ -850,4 +939,166 @@ function clearFormat() {
     activeTab: 'crop',
   };
   renderFormat();
+}
+
+// ── Supabase ──────────────────────────────────────────────────────────────────
+
+/** Updates the Supabase status badge in the page header. */
+function updateSupabaseStatus(state) {
+  const el = document.getElementById('supabase-status');
+  if (!el) return;
+  const map = {
+    checking:     { cls: 'backend-checking', text: '◌ Connecting to DB…' },
+    connected:    { cls: 'backend-online',   text: '● Supabase Connected' },
+    error:        { cls: 'backend-offline',  text: '○ DB Unavailable' },
+    unconfigured: { cls: 'backend-offline',  text: '○ Supabase not configured' },
+  };
+  const s = map[state] || map.checking;
+  el.className  = `backend-badge ${s.cls}`;
+  el.textContent = s.text;
+}
+
+/** Uploads the original file + metadata to Supabase and updates the queue item in-place. */
+async function uploadToSupabase(item) {
+  if (!sbClient) return;
+
+  item.uploading = true;
+  renderQueue();
+
+  try {
+    const safeFilename = (item.originalFilename || 'file').replaceAll(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath  = `uploads/${Date.now()}-${safeFilename}`;
+
+    const { error: storageErr } = await sbClient.storage
+      .from(SUPABASE_BUCKET)
+      .upload(storagePath, item.file, { cacheControl: '3600', upsert: false });
+    if (storageErr) throw storageErr;
+
+    item.storagePath = storagePath;
+    const { data: urlData } = sbClient.storage.from(SUPABASE_BUCKET).getPublicUrl(storagePath);
+    const snap = item.editStateSnapshot;
+
+    const { data: row, error: dbErr } = await sbClient
+      .from(SUPABASE_TABLE)
+      .insert({
+        original_filename: item.originalFilename,
+        filename:          item.filename,
+        media_type:        item.mediaType,
+        file_size:         item.file.size,
+        preset_id:         item.preset.id,
+        preset_label:      item.preset.label,
+        preset_width:      item.preset.w,
+        preset_height:     item.preset.h,
+        preset_ratio:      item.preset.ratio,
+        preset_platform:   item.preset.platform,
+        output_format:     item.outputFormat,
+        storage_path:      storagePath,
+        preview_url:       urlData.publicUrl,
+        thumbnail:         item.thumbnail,
+        brightness:        snap.brightness,
+        contrast:          snap.contrast,
+        saturation:        snap.saturation,
+        rotation:          snap.rotation,
+        flip_h:            snap.flipH,
+        flip_v:            snap.flipV,
+        crop_offset_x:     snap.cropOffsetX,
+        crop_offset_y:     snap.cropOffsetY,
+        trim_start:        snap.trimStart,
+        trim_end:          snap.trimEnd,
+        mute_audio:        snap.muteAudio,
+      })
+      .select()
+      .single();
+    if (dbErr) throw dbErr;
+
+    item.dbId      = row.id;
+    item.uploading = false;
+    updateSupabaseStatus('connected');
+    renderQueue();
+  } catch (err) {
+    console.error('[CreativeOps] Supabase upload failed:', err);
+    item.uploading   = false;
+    item.uploadError = err.message;
+    renderQueue();
+  }
+}
+
+/** Loads saved queue rows from Supabase and populates the export queue. */
+async function loadQueueFromSupabase() {
+  if (!sbClient) {
+    updateSupabaseStatus('unconfigured');
+    return;
+  }
+  updateSupabaseStatus('checking');
+  try {
+    const { data, error } = await sbClient
+      .from(SUPABASE_TABLE)
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (error) throw error;
+
+    updateSupabaseStatus('connected');
+    if (!data || data.length === 0) return;
+
+    let counter = Date.now();
+    exportQueue = data.map(row => ({
+      id:               ++counter,
+      dbId:             row.id,
+      file:             null,
+      mediaType:        row.media_type,
+      preset: {
+        id:       row.preset_id,      label:    row.preset_label,
+        w:        row.preset_width,   h:        row.preset_height,
+        ratio:    row.preset_ratio,   platform: row.preset_platform,
+      },
+      editStateSnapshot: {
+        brightness:  row.brightness,  contrast:    row.contrast,
+        saturation:  row.saturation,  rotation:    row.rotation,
+        flipH:       row.flip_h,      flipV:       row.flip_v,
+        cropOffsetX: row.crop_offset_x, cropOffsetY: row.crop_offset_y,
+        trimStart:   row.trim_start,  trimEnd:     row.trim_end,
+        muteAudio:   row.mute_audio,
+      },
+      outputFormat:     row.output_format,
+      thumbnail:        row.thumbnail || '',
+      previewDataURL:   row.thumbnail || '',
+      storagePath:      row.storage_path,
+      originalFilename: row.original_filename,
+      filename:         row.filename,
+      uploading:        false,
+      uploadError:      null,
+    }));
+
+    renderQueue();
+  } catch (err) {
+    console.error('[CreativeOps] Failed to load queue from Supabase:', err);
+    updateSupabaseStatus('error');
+  }
+}
+
+/** Generates a small (~120px) JPEG thumbnail of the current canvas for DB storage. */
+function generateThumbnail() {
+  const canvas = document.getElementById('output-canvas');
+  if (!canvas) return '';
+  const scale = Math.min(120 / canvas.width, 120 / canvas.height, 1);
+  const tc    = document.createElement('canvas');
+  tc.width    = Math.round(canvas.width  * scale);
+  tc.height   = Math.round(canvas.height * scale);
+  const ctx   = tc.getContext('2d');
+  ctx.filter  = getFilterString();
+  ctx.drawImage(canvas, 0, 0, tc.width, tc.height);
+  return tc.toDataURL('image/jpeg', 0.75);
+}
+
+/** Captures a frame from the video preview as a small JPEG thumbnail. */
+function generateVideoThumbnail() {
+  const video = document.getElementById('preview-video');
+  if (!video?.videoWidth) return '';
+  const scale = Math.min(120 / video.videoWidth, 120 / video.videoHeight, 1);
+  const tc    = document.createElement('canvas');
+  tc.width    = Math.round(video.videoWidth  * scale);
+  tc.height   = Math.round(video.videoHeight * scale);
+  tc.getContext('2d').drawImage(video, 0, 0, tc.width, tc.height);
+  return tc.toDataURL('image/jpeg', 0.75);
 }

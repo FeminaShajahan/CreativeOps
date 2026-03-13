@@ -301,6 +301,185 @@ function clearFormat() {
   renderFormat();
 }
 
+// ── Supabase ──────────────────────────────────────────────────────────────────
+
+/** Updates the Supabase status badge in the page header. */
+function updateSupabaseStatus(state) {
+  const el = document.getElementById('supabase-status');
+  if (!el) return;
+  const map = {
+    checking:     { cls: 'backend-checking', text: '◌ Connecting to DB…' },
+    connected:    { cls: 'backend-online',   text: '● Supabase Connected' },
+    error:        { cls: 'backend-offline',  text: '○ DB Unavailable' },
+    unconfigured: { cls: 'backend-offline',  text: '○ Supabase not configured' },
+  };
+  const s = map[state] || map.checking;
+  el.className  = `backend-badge ${s.cls}`;
+  el.textContent = s.text;
+}
+
+/** Uploads the original file + metadata to Supabase and updates the queue item in-place. */
+async function uploadToSupabase(item) {
+  if (!sbClient) return;
+
+  item.uploading = true;
+  renderQueue();
+
+  try {
+    // Shared UUID — both creative_dashboard and format_queue will use this same id
+    const sharedId     = crypto.randomUUID();
+    const safeFilename = (item.originalFilename || 'file').replaceAll(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath  = `uploads/${Date.now()}-${safeFilename}`;
+
+    const { error: storageErr } = await sbClient.storage
+      .from(SUPABASE_BUCKET)
+      .upload(storagePath, item.file, { cacheControl: '3600', upsert: false });
+    if (storageErr) throw storageErr;
+
+    item.storagePath = storagePath;
+    const { data: urlData } = sbClient.storage.from(SUPABASE_BUCKET).getPublicUrl(storagePath);
+    const snap = item.editStateSnapshot;
+
+    const { data: row, error: dbErr } = await sbClient
+      .from(SUPABASE_TABLE)
+      .insert({
+        id:                sharedId,
+        original_filename: item.originalFilename,
+        filename:          item.filename,
+        media_type:        item.mediaType,
+        file_size:         item.file.size,
+        preset_id:         item.preset.id,
+        preset_label:      item.preset.label,
+        preset_width:      item.preset.w,
+        preset_height:     item.preset.h,
+        preset_ratio:      item.preset.ratio,
+        preset_platform:   item.preset.platform,
+        output_format:     item.outputFormat,
+        storage_path:      storagePath,
+        preview_url:       urlData.publicUrl,
+        thumbnail:         item.thumbnail,
+        brightness:        snap.brightness,
+        contrast:          snap.contrast,
+        saturation:        snap.saturation,
+        rotation:          snap.rotation,
+        flip_h:            snap.flipH,
+        flip_v:            snap.flipV,
+        crop_offset_x:     snap.cropOffsetX,
+        crop_offset_y:     snap.cropOffsetY,
+        trim_start:        snap.trimStart,
+        trim_end:          snap.trimEnd,
+        mute_audio:        snap.muteAudio,
+      })
+      .select()
+      .single();
+    if (dbErr) throw dbErr;
+
+    item.dbId      = row.id;
+    item.uploading = false;
+    updateSupabaseStatus('connected');
+    renderQueue();
+
+    // Also record in creative_dashboard (basic asset catalog) — same id as format_queue
+    const fileFormat = (item.originalFilename || '').split('.').pop().toLowerCase() || '';
+    await sbClient.from(CREATIVE_DASHBOARD_TABLE).insert({
+      id:           sharedId,
+      name:         item.originalFilename,
+      media_type:   item.mediaType,
+      format:       fileFormat,
+      file_size:    item.file.size,
+      width:        item.srcWidth   || null,
+      height:       item.srcHeight  || null,
+      duration:     item.srcDuration || null,
+      storage_path: storagePath,
+      thumbnail:    item.thumbnail,
+      status:       'active',
+    });
+  } catch (err) {
+    console.error('[CreativeOps] Supabase upload failed:', err);
+    item.uploading   = false;
+    item.uploadError = err.message;
+    renderQueue();
+  }
+}
+
+/** Loads saved queue rows from Supabase and populates the export queue. */
+async function loadQueueFromSupabase() {
+  if (!sbClient) {
+    updateSupabaseStatus('unconfigured');
+    return;
+  }
+  updateSupabaseStatus('checking');
+  try {
+    const { data, error } = await sbClient
+      .from(SUPABASE_TABLE)
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (error) throw error;
+
+    updateSupabaseStatus('connected');
+    if (!data || data.length === 0) return;
+
+    let counter = Date.now();
+    exportQueue = data.map(row => ({
+      id:               ++counter,
+      dbId:             row.id,
+      file:             null,
+      mediaType:        row.media_type,
+      preset: {
+        id:       row.preset_id,      label:    row.preset_label,
+        w:        row.preset_width,   h:        row.preset_height,
+        ratio:    row.preset_ratio,   platform: row.preset_platform,
+      },
+      editStateSnapshot: {
+        brightness:  row.brightness,  contrast:    row.contrast,
+        saturation:  row.saturation,  rotation:    row.rotation,
+        flipH:       row.flip_h,      flipV:       row.flip_v,
+        cropOffsetX: row.crop_offset_x, cropOffsetY: row.crop_offset_y,
+        trimStart:   row.trim_start,  trimEnd:     row.trim_end,
+        muteAudio:   row.mute_audio,
+      },
+      outputFormat:     row.output_format,
+      thumbnail:        row.thumbnail || '',
+      previewDataURL:   row.thumbnail || '',
+      storagePath:      row.storage_path,
+      originalFilename: row.original_filename,
+      filename:         row.filename,
+      uploading:        false,
+      uploadError:      null,
+    }));
+
+    renderQueue();
+  } catch (err) {
+    console.error('[CreativeOps] Failed to load queue from Supabase:', err);
+    updateSupabaseStatus('error');
+  }
+}
+
+/** Generates a small (~120px) JPEG thumbnail of the current canvas for DB storage. */
+function generateThumbnail() {
+  const canvas = document.getElementById('output-canvas');
+  if (!canvas) return '';
+  const scale = Math.min(120 / canvas.width, 120 / canvas.height, 1);
+  const tc    = document.createElement('canvas');
+  tc.width    = Math.round(canvas.width  * scale);
+  tc.height   = Math.round(canvas.height * scale);
+  const ctx   = tc.getContext('2d');
+  ctx.filter  = getFilterString();
+  ctx.drawImage(canvas, 0, 0, tc.width, tc.height);
+  return tc.toDataURL('image/jpeg', 0.75);
+}
+
+/** Captures a frame from the video preview as a small JPEG thumbnail. */
+function generateVideoThumbnail() {
+  const video = document.getElementById('preview-video');
+  if (!video?.videoWidth) return '';
+  const scale = Math.min(120 / video.videoWidth, 120 / video.videoHeight, 1);
+  const tc    = document.createElement('canvas');
+  tc.width    = Math.round(video.videoWidth  * scale);
+  tc.height   = Math.round(video.videoHeight * scale);
+  tc.getContext('2d').drawImage(video, 0, 0, tc.width, tc.height);
+  return tc.toDataURL('image/jpeg', 0.75);
 // ─── Save canvas export to backend library ────────────────────────────────────
 function saveCanvasToLibrary() {
   if (!fmtImage) return;

@@ -6,7 +6,6 @@ const assetLibrary = [];
 function renderDashboard() {
   const main = document.getElementById('main-content');
 
-  const totalAssets    = assetLibrary.length || getStat('co_total_assets');
   const formatsGen     = getStat('co_formats_generated');
   const transcripts    = getStat('co_transcripts');
   const compliancePct  = calcComplianceRate();
@@ -165,6 +164,7 @@ function renderDashboard() {
 
   setupDashDrop();
   setupFilterTabs();
+  loadAssetsFromDB();
 
   // Load persisted assets from backend, then refresh grid
   loadRemoteAssets().then(() => {
@@ -186,10 +186,10 @@ function handleDashUpload(event) {
 
 function addAsset(file) {
   const id = Date.now() + Math.random();
-  const category = file.type.startsWith('image/') ? 'image'
-                 : file.type.startsWith('video/') ? 'video'
-                 : file.type.startsWith('audio/') ? 'audio'
-                 : 'other';
+  let category = 'other';
+  if (file.type.startsWith('image/'))      category = 'image';
+  else if (file.type.startsWith('video/')) category = 'video';
+  else if (file.type.startsWith('audio/')) category = 'audio';
 
   const entry = {
     id,
@@ -205,11 +205,6 @@ function addAsset(file) {
 
   assetLibrary.unshift(entry);
   logActivity(`Uploaded <strong>${file.name}</strong> (${entry.sizeMB} MB)`, 'accent');
-
-  // Persist to backend (fire-and-forget — app works without a server too)
-  uploadToAPI(file).then(remote => {
-    if (remote) entry.remoteId = remote.id;
-  });
 
   // Re-render just the grid
   const grid = document.getElementById('asset-grid');
@@ -240,7 +235,37 @@ function renderAssetGrid(filter) {
   return `<div class="asset-grid">${filtered.map(a => renderAssetCard(a)).join('')}</div>`;
 }
 
+function assetThumbHTML(a) {
+  let icon = '📄';
+  if (a.category === 'video')      icon = '🎬';
+  else if (a.category === 'audio') icon = '🎵';
+  return a.previewURL
+    ? `<img src="${a.previewURL}" class="asset-thumb-img" alt="${a.name}" />`
+    : `<div class="asset-thumb-icon">${icon}</div>`;
+}
+
 function renderAssetCard(a) {
+  const typeLabel = a.type ? (a.type.split('/')[1]?.toUpperCase() || 'FILE') : a.category.toUpperCase();
+  let typeBadgeClass = '';
+  if (a.category === 'image') typeBadgeClass = 'badge-accent';
+  else if (a.category === 'video') typeBadgeClass = 'badge-warning';
+  else if (a.category === 'audio') typeBadgeClass = 'badge-success';
+
+  const thumbContent = assetThumbHTML(a);
+
+  const dbBadge = a.source === 'db'
+    ? `<span class="asset-db-badge">☁ DB</span>`
+    : '';
+
+  let presetInfo = '';
+  if (a.source === 'db' && a.presetLabel) {
+    const dims = a.presetWidth ? ' · ' + a.presetWidth + '\xD7' + a.presetHeight : '';
+    presetInfo = '<div class="asset-preset">' + a.presetLabel + dims + '</div>';
+  }
+
+  const timeRow = a.uploadedDate
+    ? `<div class="asset-time">${a.uploadedDate} · ${a.uploadedAt}</div>`
+    : '';
   const typeLabel = a.type.split('/')[1]?.toUpperCase() || 'FILE';
   const typeBadgeClass = a.category === 'image' ? 'badge-accent'
                        : a.category === 'video' ? 'badge-warning'
@@ -262,8 +287,8 @@ function renderAssetCard(a) {
         </div>
         <div class="asset-time">${a.uploadedDate} · ${a.uploadedAt}</div>
         <div class="asset-actions">
-          <button class="asset-action-btn" ${!a.file ? 'disabled' : `onclick="sendToCompliance('${a.id}')"`} title="Check Compliance">✓ Check</button>
-          <button class="asset-action-btn" ${(!a.file || a.category !== 'image') ? 'disabled' : `onclick="sendToFormat('${a.id}')"`} title="Adapt Format">⊡ Format</button>
+          <button class="asset-action-btn" ${a.file ? `onclick="sendToCompliance('${a.id}')"` : 'disabled'} title="Check Compliance">✓ Check</button>
+          <button class="asset-action-btn" ${(a.file && a.category === 'image') ? `onclick="sendToFormat('${a.id}')"` : 'disabled'} title="Adapt Format">⊡ Format</button>
           <button class="asset-action-btn danger" title="Remove" onclick="removeAsset('${a.id}')">✕</button>
         </div>
       </div>
@@ -385,6 +410,56 @@ function clearActivity() {
   navigate('dashboard');
 }
 
+// ─── Load assets from Supabase ────────────────────────────────────────────────
+async function loadAssetsFromDB() {
+  if (!sbClient) return;
+
+  const { data, error } = await sbClient
+    .from(CREATIVE_DASHBOARD_TABLE)
+    .select('*')
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  if (error || !data || data.length === 0) return;
+
+  // Remove any previously loaded DB assets to avoid duplicates on re-render
+  for (let i = assetLibrary.length - 1; i >= 0; i--) {
+    if (assetLibrary[i].source === 'db') assetLibrary.splice(i, 1);
+  }
+
+  data.forEach(row => {
+    const sizeMB    = row.file_size ? (row.file_size / 1024 / 1024).toFixed(2) : '—';
+    const createdAt = row.created_at ? new Date(row.created_at) : null;
+    const dimLabel  = (row.width && row.height) ? row.width + '×' + row.height + 'px' : null;
+    assetLibrary.push({
+      id: --_dbAssetIdCounter,
+      dbId: row.id,
+      file: null,
+      name: row.name,
+      type: row.media_type === 'image' ? ('image/' + (row.format || 'jpeg')) : ('video/' + (row.format || 'mp4')),
+      category: row.media_type,
+      sizeMB,
+      previewURL:   row.thumbnail    || null,
+      storagePath:  row.storage_path || null,
+      uploadedDate: createdAt ? createdAt.toLocaleDateString() : '',
+      uploadedAt:   createdAt ? createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+      source: 'db',
+      presetLabel:  dimLabel,     // reuse presetLabel slot to show actual source dimensions
+      presetWidth:  row.width     || null,
+      presetHeight: row.height    || null,
+    });
+  });
+
+  // Refresh the grid with the active filter
+  const active = document.querySelector('.asset-filter.active');
+  const filter = active ? active.dataset.filter : 'all';
+  const grid = document.getElementById('asset-grid');
+  if (grid) grid.innerHTML = renderAssetGrid(filter);
+
+  // Update stat count
+  const statVal = document.querySelector('.stat-card .stat-value');
+  if (statVal) statVal.textContent = assetLibrary.length;
 // ─── Backend API helpers ──────────────────────────────────────────────────────
 
 async function uploadToAPI(file) {

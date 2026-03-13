@@ -9,11 +9,12 @@
 //      (Dashboard → Storage → New Bucket → Name: format-adapter-files → Public: ON)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SUPABASE_URL      = 'https://drytqukujgctszgfddur.supabase.co';   // e.g. https://xxxx.supabase.co
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRyeXRxdWt1amdjdHN6Z2ZkZHVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzNzc1NDcsImV4cCI6MjA4ODk1MzU0N30.avZ80tWe11UEld8KGjM8nnPjYyZ24eaojtv3z7e0kNE';       // eyJhbGciOiJIUzI1NiIsInR...
+const SUPABASE_URL      = 'https://cefbjkdgdfcmfjveresi.supabase.co';   // e.g. https://xxxx.supabase.co
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNlZmJqa2RnZGZjbWZqdmVyZXNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMTg4MDAsImV4cCI6MjA4ODg5NDgwMH0.drreQSmVHzlaRUEBvAnDueZzAKd-EzWxB8tq77y2B2E';       // eyJhbGciOiJIUzI1NiIsInR...
 
-const SUPABASE_TABLE  = 'format_queue';
-const SUPABASE_BUCKET = 'format-adapter-files';
+const SUPABASE_TABLE              = 'format_queue';
+const CREATIVE_DASHBOARD_TABLE    = 'creative_dashboard';
+const SUPABASE_BUCKET             = 'format-adapter-files';
 
 // ── Client (initialised by initSupabase()) ────────────────────────────────────
 let sbClient = null;

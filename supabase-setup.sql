@@ -64,7 +64,48 @@ create index if not exists format_queue_created_at_idx
 
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 4. Storage bucket — do this in the Dashboard UI (SQL cannot create buckets)
+-- 4. Create the creative_dashboard table
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists creative_dashboard (
+  -- Identity
+  id           uuid default gen_random_uuid() primary key,
+  created_at   timestamp with time zone default now(),
+
+  -- File metadata
+  name         text        not null,
+  media_type   text        not null check (media_type in ('image', 'video')),
+  format       text,                -- e.g. 'jpg', 'png', 'mp4'
+  file_size    bigint,
+
+  -- Source dimensions
+  width        integer,             -- original width in pixels
+  height       integer,             -- original height in pixels
+  duration     real,                -- video duration in seconds (null for images)
+
+  -- Storage
+  storage_path text,                -- path inside the Supabase Storage bucket
+  thumbnail    text,                -- small base64 JPEG thumbnail (≈120px)
+
+  -- Lifecycle
+  status       text default 'active' check (status in ('active', 'archived'))
+);
+
+-- RLS — allow all reads and writes for now
+alter table creative_dashboard enable row level security;
+
+drop policy if exists "creative_dashboard_allow_all" on creative_dashboard;
+create policy "creative_dashboard_allow_all"
+  on creative_dashboard for all
+  using (true)
+  with check (true);
+
+-- Index for faster chronological loading
+create index if not exists creative_dashboard_created_at_idx
+  on creative_dashboard (created_at desc);
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 5. Storage bucket — do this in the Dashboard UI (SQL cannot create buckets)
 -- ─────────────────────────────────────────────────────────────────────────────
 --   Dashboard → Storage → New Bucket
 --     Name   : format-adapter-files

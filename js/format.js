@@ -758,12 +758,22 @@ function addToQueue() {
 
   let previewDataURL = '';
   let thumbnail      = '';
+  let srcWidth = null, srcHeight = null, srcDuration = null;
+
   if (fmtMediaType === 'image' && fmtImage) {
     drawCanvas();
     previewDataURL = getFilteredDataURL(fmt);
     thumbnail      = generateThumbnail();
+    srcWidth       = fmtImage.naturalWidth;
+    srcHeight      = fmtImage.naturalHeight;
   } else if (fmtMediaType === 'video') {
     thumbnail = generateVideoThumbnail();
+    const videoEl = document.getElementById('preview-video');
+    if (videoEl) {
+      srcWidth    = videoEl.videoWidth  || null;
+      srcHeight   = videoEl.videoHeight || null;
+      srcDuration = videoEl.duration    || null;
+    }
   }
 
   const item = {
@@ -779,6 +789,9 @@ function addToQueue() {
     storagePath:      null,
     originalFilename: fmtFile.name,
     filename:         `${selectedPreset.id}_${selectedPreset.w}x${selectedPreset.h}.${ext}`,
+    srcWidth,
+    srcHeight,
+    srcDuration,
     uploading:        false,
     uploadError:      null,
   };
@@ -1018,6 +1031,8 @@ async function uploadToSupabase(item) {
   renderQueue();
 
   try {
+    // Shared UUID — both creative_dashboard and format_queue will use this same id
+    const sharedId     = crypto.randomUUID();
     const safeFilename = (item.originalFilename || 'file').replaceAll(/[^a-zA-Z0-9._-]/g, '_');
     const storagePath  = `uploads/${Date.now()}-${safeFilename}`;
 
@@ -1033,6 +1048,7 @@ async function uploadToSupabase(item) {
     const { data: row, error: dbErr } = await sbClient
       .from(SUPABASE_TABLE)
       .insert({
+        id:                sharedId,
         original_filename: item.originalFilename,
         filename:          item.filename,
         media_type:        item.mediaType,
@@ -1067,6 +1083,22 @@ async function uploadToSupabase(item) {
     item.uploading = false;
     updateSupabaseStatus('connected');
     renderQueue();
+
+    // Also record in creative_dashboard (basic asset catalog) — same id as format_queue
+    const fileFormat = (item.originalFilename || '').split('.').pop().toLowerCase() || '';
+    await sbClient.from(CREATIVE_DASHBOARD_TABLE).insert({
+      id:           sharedId,
+      name:         item.originalFilename,
+      media_type:   item.mediaType,
+      format:       fileFormat,
+      file_size:    item.file.size,
+      width:        item.srcWidth   || null,
+      height:       item.srcHeight  || null,
+      duration:     item.srcDuration || null,
+      storage_path: storagePath,
+      thumbnail:    item.thumbnail,
+      status:       'active',
+    });
   } catch (err) {
     console.error('[CreativeOps] Supabase upload failed:', err);
     item.uploading   = false;

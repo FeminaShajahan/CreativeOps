@@ -291,7 +291,7 @@ function removeAsset(id) {
 
   // Delete from Supabase if it came from DB
   if (asset.source === 'db' && asset.dbId && sbClient) {
-    sbClient.from(SUPABASE_TABLE).delete().eq('id', asset.dbId).then(() => {});
+    sbClient.from(CREATIVE_DASHBOARD_TABLE).delete().eq('id', asset.dbId).then(() => {});
     if (asset.storagePath) {
       sbClient.storage.from(SUPABASE_BUCKET).remove([asset.storagePath]).then(() => {});
     }
@@ -424,8 +424,9 @@ async function loadAssetsFromDB() {
   if (!sbClient) return;
 
   const { data, error } = await sbClient
-    .from(SUPABASE_TABLE)
+    .from(CREATIVE_DASHBOARD_TABLE)
     .select('*')
+    .eq('status', 'active')
     .order('created_at', { ascending: false })
     .limit(100);
 
@@ -437,24 +438,25 @@ async function loadAssetsFromDB() {
   }
 
   data.forEach(row => {
-    const sizeMB = row.file_size ? (row.file_size / 1024 / 1024).toFixed(2) : '—';
+    const sizeMB    = row.file_size ? (row.file_size / 1024 / 1024).toFixed(2) : '—';
     const createdAt = row.created_at ? new Date(row.created_at) : null;
+    const dimLabel  = (row.width && row.height) ? row.width + '×' + row.height + 'px' : null;
     assetLibrary.push({
-      id: --_dbAssetIdCounter,        // negative to avoid clashing with local Date.now() ids
+      id: --_dbAssetIdCounter,
       dbId: row.id,
-      file: null,                     // fetched on demand via fetchAssetFile()
-      name: row.original_filename || row.filename,
-      type: row.media_type === 'image' ? 'image/jpeg' : 'video/mp4',
+      file: null,
+      name: row.name,
+      type: row.media_type === 'image' ? ('image/' + (row.format || 'jpeg')) : ('video/' + (row.format || 'mp4')),
       category: row.media_type,
       sizeMB,
-      previewURL: row.thumbnail || null,
-      storagePath: row.storage_path || null,
+      previewURL:   row.thumbnail    || null,
+      storagePath:  row.storage_path || null,
       uploadedDate: createdAt ? createdAt.toLocaleDateString() : '',
       uploadedAt:   createdAt ? createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
       source: 'db',
-      presetLabel:  row.preset_label  || null,
-      presetWidth:  row.preset_width  || null,
-      presetHeight: row.preset_height || null,
+      presetLabel:  dimLabel,     // reuse presetLabel slot to show actual source dimensions
+      presetWidth:  row.width     || null,
+      presetHeight: row.height    || null,
     });
   });
 
